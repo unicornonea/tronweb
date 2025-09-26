@@ -176,6 +176,24 @@ describe('TronWeb.transactionBuilder', function () {
                 'ContractValidateException'
             );
         });
+
+        it('should send 10 sun from default address to accounts[1] for more than 2 times in one block', async function () {
+            const param: Parameters<TransactionBuilder['sendTrx']> = [accounts.b58[1], 10];
+            let firstBlockNum = '';
+            let loopTimes = 0;
+            for (let i = 0; i < 100; i++) {
+                loopTimes++;
+                const res = await broadcaster(tronWeb.transactionBuilder.sendTrx(...param));
+                if (firstBlockNum === '') {
+                    firstBlockNum = res.transaction.raw_data.ref_block_bytes;
+                } else {
+                    if (firstBlockNum !== res.transaction.raw_data.ref_block_bytes) break;
+                }
+
+                assert.isTrue(res.receipt.result);
+            }
+            assert.isAtLeast(loopTimes, 2, 'loopTimes is less than 2 times, should rerun');
+        })
     });
 
     describe('#createToken()', function () {
@@ -2433,8 +2451,8 @@ describe('TronWeb.transactionBuilder', function () {
 
             transaction = await tronWeb.transactionBuilder.createSmartContract(
                 {
-                    abi: testConstant.abi,
-                    bytecode: testConstant.bytecode,
+                    abi: testPayable.abi,
+                    bytecode: testPayable.bytecode,
                 },
                 accounts.hex[6]
             );
@@ -2455,18 +2473,15 @@ describe('TronWeb.transactionBuilder', function () {
 
             const contractAddress = transaction.contract_address;
             const issuerAddress = accounts.hex[6];
-            const functionSelector = 'testPure(uint256,uint256)';
+            const functionSelector = 'store(uint256)';
             const parameter = [
                 { type: 'uint256', value: 1 },
-                { type: 'uint256', value: 2 },
             ];
-            const options: TriggerConstantContractOptions = {
-                _isConstant: true,
-            };
+            const options: TriggerConstantContractOptions = {};
 
             for (let i = 0; i < 2; i++) {
                 if (i === 1) options.permissionId = 2;
-                transaction = await tronWeb.transactionBuilder.triggerSmartContract(
+                const tx = await tronWeb.transactionBuilder.triggerSmartContract(
                     contractAddress,
                     functionSelector,
                     options,
@@ -2474,18 +2489,45 @@ describe('TronWeb.transactionBuilder', function () {
                     issuerAddress
                 );
                 assert.isTrue(
-                    transaction.result.result &&
-                        transaction.transaction.raw_data.contract[0].parameter.type_url ===
+                    tx.result.result &&
+                        tx.transaction.raw_data.contract[0].parameter.type_url ===
                             'type.googleapis.com/protocol.TriggerSmartContract'
                 );
-                assert.equal(transaction.constant_result, '0000000000000000000000000000000000000000000000000000000000000004');
-
-                // @ts-ignore
-                transaction = await broadcaster(null, accounts.pks[6], transaction.transaction);
-                assert.isTrue(transaction.receipt.result);
-                assert.equal(transaction.transaction.raw_data.contract[0].Permission_id || 0, options.permissionId || 0);
+                const broadcastedTx = await broadcaster(null, accounts.pks[6], tx.transaction);
+                assert.isTrue(broadcastedTx.receipt.result);
+                assert.equal(broadcastedTx.transaction.raw_data.contract[0].Permission_id || 0, options.permissionId || 0);
             }
         });
+
+        it('should triggerSmartContract for more than 2 times in one block', async function () {
+            const contractAddress = transaction.contract_address;
+            const issuerAddress = accounts.hex[6];
+            const functionSelector = 'store(uint256)';
+            const parameter = [
+                { type: 'uint256', value: 1 },
+            ];
+            const options: TriggerConstantContractOptions = {};
+            let firstBlockNum = '';
+            let loopTimes = 0;
+            for (let i = 0; i < 100; i++) {
+                loopTimes++;
+                const tx = await tronWeb.transactionBuilder.triggerSmartContract(
+                    contractAddress,
+                    functionSelector,
+                    options,
+                    parameter,
+                    issuerAddress
+                );
+                if (firstBlockNum === '') {
+                    firstBlockNum = tx.transaction.raw_data.ref_block_bytes;
+                } else {
+                    if (firstBlockNum !== tx.transaction.raw_data.ref_block_bytes) break;
+                }
+                const { receipt } = await broadcaster(null, accounts.pks[6], tx.transaction);
+                assert.isTrue(receipt.result);
+            }
+            assert.isAtLeast(loopTimes, 2, 'loopTimes is less than 2 times, should rerun');
+        })
     });
 
     describe('#createTokenExchange', async function () {
