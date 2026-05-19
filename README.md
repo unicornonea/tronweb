@@ -167,6 +167,109 @@ const tronWeb = new TronWeb({
 )
 ```
 
+  ### Viem-style Client Initialization
+
+  If you prefer a viem-like workflow, TronWeb also supports additive client factories. This does not change any existing `new TronWeb(...)` usage.
+
+  Current built-in chains are available from `tronweb/chains`:
+
+  - `mainnet` -> chainId `728126428` -> `https://api.trongrid.io`
+  - `nile` -> chainId `3448148188` -> `https://nile.trongrid.io`
+  - `shasta` -> chainId `2494104990` -> `https://api.shasta.trongrid.io`
+
+  Currently, `http()` is the only supported transport. The transport layer is kept separate so more transports can be added later without breaking existing TronWeb APIs.
+  The `chain.id` field follows the viem convention and stores the numeric chainId.
+
+  ```ts
+  import { createPublicClient, http } from 'tronweb'
+  import { mainnet } from 'tronweb/chains'
+
+  const publicClient = createPublicClient({
+    chain: mainnet,
+    transport: http(),
+  })
+
+  const blockNumber = await publicClient.getBlockNumber()
+  const block = await publicClient.getBlock({ blockTag: 'latest' })
+  ```
+
+  ```ts
+  import { createWalletClient, http, privateKeyToAccount } from 'tronweb'
+  import { nile } from 'tronweb/chains'
+
+  const account = privateKeyToAccount('0xyour-private-key')
+
+  const walletClient = createWalletClient({
+    account,
+    chain: nile,
+    transport: http(),
+  })
+
+  const balance = await walletClient.getBalance({ address: account.address })
+  ```
+
+  A small set of common read actions is also exposed on the client itself so you do not always need to go through `client.trx.*`.
+  These top-level helpers support both the current scalar form and a viem-like object-style form.
+
+  Examples:
+
+  - `client.getBlock('latest')`
+  - `client.getBlock({ blockTag: 'latest' })`
+  - `client.getBalance('T...')`
+  - `client.getBalance({ address: 'T...' })`
+  - `client.getTransaction('txid')`
+  - `client.getTransaction({ hash: 'txid' })`
+
+  Current top-level query helpers:
+
+  - `getAccount`
+  - `getBalance`
+  - `getBlock`
+  - `getBlockByHash`
+  - `getBlockByNumber`
+  - `getBlockNumber`
+  - `getTransaction`
+  - `getTransactionInfo`
+
+  You can still override the default endpoint explicitly:
+
+  ```ts
+  import { createPublicClient, http } from 'tronweb'
+  import { mainnet } from 'tronweb/chains'
+
+  const publicClient = createPublicClient({
+    chain: mainnet,
+    transport: http('https://your-custom-node.tld'),
+  })
+  ```
+
+  If you need a custom chain definition, you can keep the same style and define one without affecting the legacy TronWeb constructor flow:
+
+  ```ts
+  import { createPublicClient, defineChain, http } from 'tronweb'
+
+  const privateChain = defineChain({
+    id: 728126428,
+    name: 'Private TRON Mainnet Mirror',
+    network: 'mainnet',
+    nativeCurrency: {
+      name: 'TRON',
+      symbol: 'TRX',
+      decimals: 6,
+    },
+    rpcUrls: {
+      default: {
+        http: ['https://private.trongrid.local'],
+      },
+    },
+  })
+
+  const publicClient = createPublicClient({
+    chain: privateChain,
+    transport: http(),
+  })
+  ```
+
 ## FAQ
 
 1. Cannot destructure property 'Transaction' of 'globalThis.TronWebProto' as it is undefined.
