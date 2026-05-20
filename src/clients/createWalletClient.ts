@@ -5,10 +5,11 @@ import type { TransactionBuilder } from '../lib/TransactionBuilder/TransactionBu
 import type { SignedTransaction } from '../types/Transaction.js';
 import type { BroadcastReturn } from '../types/Trx.js';
 import { createClientQueryActions } from './createClientQueryActions.js';
+import { createClientMetadata } from './createClientMetadata.js';
 import { resolveClientConfig } from './resolveClientConfig.js';
 
 /**
- * Create a write-capable TronWeb client, analogous to viem's `createWalletClient`.
+ * Create a write-capable TronWeb client.
  *
  * The client uses the provided Account for all signing operations. The Account's
  * private key is never exposed — signing is delegated to `account.signTransaction()`.
@@ -30,7 +31,7 @@ import { resolveClientConfig } from './resolveClientConfig.js';
  * ```
  */
 export function createWalletClient<TAccount extends WalletAccount>(config: WalletClientConfig<TAccount>): WalletClient<TAccount> {
-    const { account, ...clientConfig } = config;
+    const { account, key, name, ...clientConfig } = config;
     const { chain, transport, tronWebConfig } = resolveClientConfig(clientConfig);
     // Initialise TronWeb with the account's address so the default address is set,
     // but we never pass the raw private key — signing always goes through account.signTransaction().
@@ -67,9 +68,17 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
         return tronWeb.trx.sendRawTransaction(signed);
     };
 
-    const queryActions = createClientQueryActions(tronWeb.trx);
+    const metadata = createClientMetadata({
+        key,
+        name,
+        defaultKey: 'wallet',
+        defaultName: 'Wallet Client',
+        type: 'walletClient',
+    });
+    const queryActions = createClientQueryActions({ chain, tronWeb, trx: tronWeb.trx });
 
     const client: WalletClient<TAccount> = {
+        ...metadata,
         ...queryActions,
         get chain() {
             return chain;

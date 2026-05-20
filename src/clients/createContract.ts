@@ -62,7 +62,7 @@ function isWalletClient(client: PublicClient | WalletClient): client is WalletCl
 }
 
 /**
- * Create a type-safe contract wrapper, analogous to viem's contract abstraction.
+ * Create a type-safe contract wrapper.
  *
  * - `view`/`pure` methods are called with `.call()` automatically, returning the result directly.
  * - State-changing methods are built, signed with `client.account`, and broadcast, returning the txID.

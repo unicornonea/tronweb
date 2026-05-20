@@ -115,7 +115,7 @@ describe('privateKeyToAccount', function () {
         }
     }
 
-    it('returns a plain viem-style local account object without leaking the private key', function () {
+    it('returns a plain local account object without leaking the private key', function () {
         assert.equal(account.address, expectedAddress);
         assert.equal(account.publicKey, expectedPublicKey);
         assert.equal(account.type, 'local');
@@ -155,7 +155,7 @@ describe('privateKeyToAccount', function () {
         );
     });
 
-    it('supports sign({ hash }) and viem-style signMessage parameters', async function () {
+    it('supports sign({ hash }) and object-style signMessage parameters', async function () {
         const hash = `0x${'11'.repeat(32)}` as `0x${string}`;
         const signaturePromise = account.sign({ hash });
         const signature = await signaturePromise;
@@ -180,7 +180,7 @@ describe('privateKeyToAccount', function () {
         assert.equal(rawHexSignature, rawBytesSignature);
     });
 
-    it('supports viem-style signTypedData parameters', async function () {
+    it('supports object-style signTypedData parameters', async function () {
         const signaturePromise = account.signTypedData({
             domain: typedDataDomain,
             types: typedDataTypes,

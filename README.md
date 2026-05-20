@@ -167,9 +167,9 @@ const tronWeb = new TronWeb({
 )
 ```
 
-  ### Viem-style Client Initialization
+  ### Client Factory Initialization
 
-  If you prefer a viem-like workflow, TronWeb also supports additive client factories. This does not change any existing `new TronWeb(...)` usage.
+  If you prefer a factory-based client workflow, TronWeb also supports additive client factories. This does not change any existing `new TronWeb(...)` usage.
 
   Current built-in chains are available from `tronweb/chains`:
 
@@ -178,7 +178,7 @@ const tronWeb = new TronWeb({
   - `shasta` -> chainId `2494104990` -> `https://api.shasta.trongrid.io`
 
   Currently, `http()` is the only supported transport. The transport layer is kept separate so more transports can be added later without breaking existing TronWeb APIs.
-  The `chain.id` field follows the viem convention and stores the numeric chainId.
+  The `chain.id` field stores the numeric chainId.
 
   ```ts
   import { createPublicClient, http } from 'tronweb'
@@ -209,7 +209,7 @@ const tronWeb = new TronWeb({
   ```
 
   A small set of common read actions is also exposed on the client itself so you do not always need to go through `client.trx.*`.
-  These top-level helpers support both the current scalar form and a viem-like object-style form.
+  These top-level helpers support both the current scalar form and an object-style form.
 
   Examples:
 

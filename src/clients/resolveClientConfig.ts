@@ -10,6 +10,8 @@ type ResolvedHttpTransport = HttpTransport & { url: string };
 type ClientConfigWithTransport = Omit<TronWebOptions, 'privateKey'> & {
     chain?: Chain;
     transport?: Transport;
+    key?: string;
+    name?: string;
 };
 
 export interface ResolvedClientConfig {
@@ -42,7 +44,7 @@ function resolveHttpTransport(chain?: Chain, transport?: Transport): ResolvedHtt
 }
 
 export function resolveClientConfig(config: ClientConfigWithTransport): ResolvedClientConfig {
-    const { chain, transport, ...tronWebConfig } = config;
+    const { chain, transport, key: _key, name: _name, ...tronWebConfig } = config;
 
     if (hasExplicitNodeConfig(tronWebConfig)) {
         return {

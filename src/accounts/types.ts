@@ -35,9 +35,9 @@ export interface Account {
     readonly address: string;
     /** Uncompressed public key, hex string (0x04...) */
     readonly publicKey: Hex;
-    /** viem-style local account type marker */
+    /** Local account type marker */
     readonly type: AccountType;
-    /** viem-style account source marker */
+    /** Account source marker */
     readonly source: AccountSource;
 
     /**
@@ -69,7 +69,7 @@ export interface Account {
 }
 
 /**
- * A viem-style private key account with async message and typed-data signing.
+ * A private key account with async message and typed-data signing.
  */
 export type PrivateKeyAccount = Omit<Account, 'sign' | 'signMessage' | 'signTransaction' | 'signTypedData'> & {
     sign(params: SignHashParameters): Promise<Hex>;

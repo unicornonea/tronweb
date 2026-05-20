@@ -6,6 +6,7 @@ import {
     type PublicClientConfig,
     type PublicClientTrx,
 } from './types.js';
+import { createClientMetadata } from './createClientMetadata.js';
 import { createClientQueryActions } from './createClientQueryActions.js';
 import { resolveClientConfig } from './resolveClientConfig.js';
 
@@ -48,7 +49,7 @@ function createPublicClientTrx(trx: Trx): PublicClientTrx {
 }
 
 /**
- * Create a read-only TronWeb client, analogous to viem's `createPublicClient`.
+ * Create a read-only TronWeb client.
  *
  * The returned client proxies `trx` and `transactionBuilder` from an internal
  * TronWeb instance. No private key is involved — all state-changing operations
@@ -64,12 +65,21 @@ function createPublicClientTrx(trx: Trx): PublicClientTrx {
  * ```
  */
 export function createPublicClient(config: PublicClientConfig): PublicClient {
+    const { key, name } = config;
     const { chain, transport, tronWebConfig } = resolveClientConfig(config);
     const tronWeb = new TronWeb({ ...tronWebConfig });
     const publicTrx = createPublicClientTrx(tronWeb.trx);
-    const queryActions = createClientQueryActions(tronWeb.trx);
+    const metadata = createClientMetadata({
+        key,
+        name,
+        defaultKey: 'public',
+        defaultName: 'Public Client',
+        type: 'publicClient',
+    });
+    const queryActions = createClientQueryActions({ chain, tronWeb, trx: tronWeb.trx });
 
     const client: PublicClient = {
+        ...metadata,
         ...queryActions,
         get chain() {
             return chain;
