@@ -167,108 +167,368 @@ const tronWeb = new TronWeb({
 )
 ```
 
-  ### Client Factory Initialization
+### Viem-Style Account, Client & Contract Factories
 
-  If you prefer a factory-based client workflow, TronWeb also supports additive client factories. This does not change any existing `new TronWeb(...)` usage.
+If you prefer a factory-based workflow, TronWeb also supports additive account, client, and contract factories. This does not replace any existing `new TronWeb(...)` usage.
 
-  Current built-in chains are available from `tronweb/chains`:
+For the current full compatibility summary, see `TRONWEB_VIEM_FULL_ALIGNMENT_COMPARISON.md`.
 
-  - `mainnet` -> chainId `728126428` -> `https://api.trongrid.io`
-  - `nile` -> chainId `3448148188` -> `https://nile.trongrid.io`
-  - `shasta` -> chainId `2494104990` -> `https://api.shasta.trongrid.io`
+#### Account abstraction
 
-  Currently, `http()` is the only supported transport. The transport layer is kept separate so more transports can be added later without breaking existing TronWeb APIs.
-  The `chain.id` field stores the numeric chainId.
+`privateKeyToAccount('0x...')` returns a local account object that can be passed directly into `createWalletClient(...)`.
 
-  ```ts
-  import { createPublicClient, http } from 'tronweb'
-  import { mainnet } from 'tronweb/chains'
+The returned account exposes:
 
-  const publicClient = createPublicClient({
-    chain: mainnet,
-    transport: http(),
-  })
+- `address`
+- `publicKey`
+- `type`
+- `source`
+- `sign({ hash })`
+- `signMessage({ message })`
+- `signTransaction(transaction)`
+- `signTypedData({ domain, types, primaryType, message })`
 
-  const blockNumber = await publicClient.getBlockNumber()
-  const block = await publicClient.getBlock({ blockTag: 'latest' })
-  ```
+The private key stays encapsulated and is never exposed on the returned object.
 
-  ```ts
-  import { createWalletClient, http, privateKeyToAccount } from 'tronweb'
-  import { nile } from 'tronweb/chains'
+```ts
+import { privateKeyToAccount } from 'tronweb'
 
-  const account = privateKeyToAccount('0xyour-private-key')
+const account = privateKeyToAccount('0xyour-private-key')
 
-  const walletClient = createWalletClient({
-    account,
-    chain: nile,
-    transport: http(),
-  })
+const signature = await account.signMessage({
+  message: 'hello tron',
+})
+```
 
-  const balance = await walletClient.getBalance({ address: account.address })
-  ```
+Recover helpers remain on existing TronWeb utilities instead of being duplicated on the account object:
 
-  A small set of common read actions is also exposed on the client itself so you do not always need to go through `client.trx.*`.
-  These top-level helpers support both the current scalar form and an object-style form.
+- `utils.message.verifyMessage(...)`
+- `utils.typedData.verifyTypedData(...)`
+- `utils.crypto.ecRecover(...)`
+- `Trx.verifyTypedData(...)`
+- `Trx.ecRecover(...)`
 
-  Examples:
+#### Client factories
 
-  - `client.getBlock('latest')`
-  - `client.getBlock({ blockTag: 'latest' })`
-  - `client.getBalance('T...')`
-  - `client.getBalance({ address: 'T...' })`
-  - `client.getTransaction('txid')`
-  - `client.getTransaction({ hash: 'txid' })`
+Current built-in chains are available from `tronweb/chains`:
 
-  Current top-level query helpers:
+- `mainnet` -> chainId `728126428` -> `https://api.trongrid.io`
+- `nile` -> chainId `3448148188` -> `https://nile.trongrid.io`
+- `shasta` -> chainId `2494104990` -> `https://api.shasta.trongrid.io`
 
-  - `getAccount`
-  - `getBalance`
-  - `getBlock`
-  - `getBlockByHash`
-  - `getBlockByNumber`
-  - `getBlockNumber`
-  - `getTransaction`
-  - `getTransactionInfo`
+Currently, `http()` is the only supported transport. The transport layer is kept separate so more transports can be added later without breaking existing TronWeb APIs.
+The `chain.id` field stores the numeric chainId.
 
-  You can still override the default endpoint explicitly:
+Both `createPublicClient(...)` and `createWalletClient(...)` expose client metadata (`key`, `name`, `type`, `uid`) along with `chain`, `transport`, `trx`, and `transactionBuilder`.
 
-  ```ts
-  import { createPublicClient, http } from 'tronweb'
-  import { mainnet } from 'tronweb/chains'
+```ts
+import { createPublicClient, http } from 'tronweb'
+import { mainnet } from 'tronweb/chains'
 
-  const publicClient = createPublicClient({
-    chain: mainnet,
-    transport: http('https://your-custom-node.tld'),
-  })
-  ```
+const publicClient = createPublicClient({
+  chain: mainnet,
+  transport: http(),
+})
 
-  If you need a custom chain definition, you can keep the same style and define one without affecting the legacy TronWeb constructor flow:
+const chainId = await publicClient.getChainId()
+const blockNumber = await publicClient.getBlockNumber()
+const block = await publicClient.getBlock({ blockTag: 'latest' })
+```
 
-  ```ts
-  import { createPublicClient, defineChain, http } from 'tronweb'
+Current top-level public client helpers:
 
-  const privateChain = defineChain({
-    id: 728126428,
-    name: 'Private TRON Mainnet Mirror',
-    network: 'mainnet',
-    nativeCurrency: {
-      name: 'TRON',
-      symbol: 'TRX',
-      decimals: 6,
+- `getAccount`
+- `getBalance`
+- `getBlock`
+- `getBlockByHash`
+- `getBlockByNumber`
+- `getBlockTransactionCount`
+- `getChainId`
+- `getBlockNumber`
+- `getTransaction`
+- `getTransactionInfo`
+- `getTransactionReceipt`
+- `waitForTransactionReceipt`
+- `call`
+- `readContract`
+- `estimateContractGas`
+- `getLogs`
+- `getContractEvents`
+- `verifyMessage`
+- `verifyTypedData`
+
+These top-level helpers support both the current scalar form and an object-style form where it makes sense.
+
+Examples:
+
+- `client.getBlock('latest')`
+- `client.getBlock({ blockTag: 'latest' })`
+- `client.getBalance('T...')`
+- `client.getBalance({ address: 'T...' })`
+- `client.getTransaction('txid')`
+- `client.getTransaction({ hash: 'txid' })`
+
+You can still override the default endpoint explicitly:
+
+```ts
+import { createPublicClient, http } from 'tronweb'
+import { mainnet } from 'tronweb/chains'
+
+const publicClient = createPublicClient({
+  chain: mainnet,
+  transport: http('https://your-custom-node.tld'),
+})
+```
+
+If you need a custom chain definition, you can keep the same style and define one without affecting the legacy TronWeb constructor flow:
+
+```ts
+import { createPublicClient, defineChain, http } from 'tronweb'
+
+const privateChain = defineChain({
+  id: 728126428,
+  name: 'Private TRON Mainnet Mirror',
+  network: 'mainnet',
+  nativeCurrency: {
+    name: 'TRON',
+    symbol: 'TRX',
+    decimals: 6,
+  },
+  rpcUrls: {
+    default: {
+      http: ['https://private.trongrid.local'],
     },
-    rpcUrls: {
-      default: {
-        http: ['https://private.trongrid.local'],
-      },
-    },
-  })
+  },
+})
 
-  const publicClient = createPublicClient({
-    chain: privateChain,
-    transport: http(),
-  })
-  ```
+const publicClient = createPublicClient({
+  chain: privateChain,
+  transport: http(),
+})
+```
+
+#### Wallet client helpers
+
+`createWalletClient(...)` extends the read/query surface with top-level wallet actions.
+
+```ts
+import { createWalletClient, http, privateKeyToAccount } from 'tronweb'
+import { nile } from 'tronweb/chains'
+
+const account = privateKeyToAccount('0xyour-private-key')
+
+const walletClient = createWalletClient({
+  account,
+  chain: nile,
+  transport: http(),
+})
+
+const addresses = await walletClient.getAddresses()
+const balance = await walletClient.getBalance({ address: account.address })
+```
+
+Current top-level wallet helpers:
+
+- `getAddresses`
+- `requestAddresses`
+- `sendRawTransaction`
+- `signMessage`
+- `signTransaction`
+- `signTypedData`
+- `writeContract`
+- `deployContract`
+- `sendTransaction`
+
+`walletClient.signMessage()` uses TRON `signMessageV2` semantics. It does not fall back to the legacy `trx.signMessage` v1 behavior.
+
+`sendTransaction(...)` keeps a TRON-native shape:
+
+```ts
+const result = await walletClient.sendTransaction({
+  type: 'sendTrx',
+  parameters: ['TXx...toAddress', 1_000_000, account.address],
+})
+```
+
+`writeContract(...)` and `deployContract(...)` accept object-style parameters and keep TRON-specific fields such as `feeLimit`, `tokenId`, `tokenValue`, and `permissionId`.
+
+#### Contract abstraction
+
+`getContract({ client, abi, address })` is now the canonical contract wrapper entry on top of either a public client or a wallet client.
+
+`createContract(...)` is still exported as a backward-compatible alias.
+
+The returned contract currently exposes:
+
+- `address`
+- `abi`
+- `read.*`
+- `estimateGas.*`
+- `getEvents.*`
+- `write.*` when the client is a wallet client
+
+Most flat ABI methods are also preserved as a compatibility layer when their names do not collide with reserved contract keys.
+
+```ts
+import {
+  getContract,
+  createWalletClient,
+  http,
+  privateKeyToAccount,
+} from 'tronweb'
+import { mainnet } from 'tronweb/chains'
+
+const client = createWalletClient({
+  account: privateKeyToAccount('0xyour-private-key'),
+  chain: mainnet,
+  transport: http(),
+})
+
+const contract = getContract({
+  client,
+  abi: MyAbi,
+  address: 'TXx...',
+})
+
+const balance = await contract.read.balanceOf(['TXx...owner'])
+const gas = await contract.estimateGas.transfer(['TXx...to', 1000n])
+const txId = await contract.write.transfer(['TXx...to', 1000n], {
+  feeLimit: 150_000_000,
+})
+const events = await contract.getEvents.Transfer({ to: 'TXx...to' }, {
+  onlyConfirmed: true,
+  limit: 10,
+})
+```
+
+The flat compatibility layer still works for most ABI method names:
+
+```ts
+const balance = await contract.balanceOf('TXx...owner')
+const txId = await contract.transfer('TXx...to', 1000n)
+```
+
+Reserved contract instance keys are:
+
+- `address`
+- `abi`
+- `read`
+- `write`
+- `estimateGas`
+- `getEvents`
+
+If an ABI method collides with one of these keys, use the namespaced API instead of the flat compatibility layer.
+
+#### Coming from viem
+
+If you are already used to viem, the closest TronWeb patterns look like this.
+
+Action-style contract calls:
+
+```ts
+// viem
+const balance = await publicClient.readContract({
+  address: contractAddress,
+  abi: ERC20_ABI,
+  functionName: 'balanceOf',
+  args: [ownerAddress],
+})
+
+const hash = await walletClient.writeContract({
+  address: contractAddress,
+  abi: ERC20_ABI,
+  functionName: 'transfer',
+  args: [recipientAddress, parseUnits('1', 6)],
+  account,
+})
+
+// tronweb
+const balance = await publicClient.readContract({
+  address: contractAddress,
+  abi: TRC20_ABI,
+  functionName: 'balanceOf',
+  args: [ownerAddress],
+})
+
+const txId = await walletClient.writeContract({
+  address: contractAddress,
+  abi: TRC20_ABI,
+  functionName: 'transfer',
+  args: [recipientAddress, 1_000_000n],
+  account: account.address,
+  feeLimit: 100_000_000,
+})
+```
+
+Contract instance style:
+
+```ts
+// viem
+const contract = getContract({
+  address: contractAddress,
+  abi: ERC20_ABI,
+  client: {
+    public: publicClient,
+    wallet: walletClient,
+  },
+})
+
+const balance = await contract.read.balanceOf([ownerAddress])
+const hash = await contract.write.transfer(
+  [recipientAddress, parseUnits('1', 6)],
+  { account },
+)
+
+// tronweb
+const contract = getContract({
+  client: walletClient,
+  abi: TRC20_ABI,
+  address: contractAddress,
+})
+
+const balance = await contract.read.balanceOf([ownerAddress])
+const txId = await contract.write.transfer(
+  [recipientAddress, 1_000_000n],
+  {
+    account: account.address,
+    feeLimit: 100_000_000,
+  },
+)
+```
+
+Message signing and verification:
+
+```ts
+// viem
+const signature = await walletClient.signMessage({
+  message: 'hello world',
+})
+
+const isValid = await publicClient.verifyMessage({
+  address: account.address,
+  message: 'hello world',
+  signature,
+})
+
+// tronweb
+const signature = await walletClient.signMessage({
+  message: 'hello tron',
+})
+
+const isValid = await publicClient.verifyMessage({
+  address: account.address,
+  message: 'hello tron',
+  signature,
+})
+```
+
+The most important differences to remember are:
+
+- TronWeb contract and account addresses are usually TRON base58Check addresses instead of EVM `0x...` addresses.
+- `walletClient.writeContract(...)` returns a TRON `txId`.
+- TronWeb keeps TRON-native write options such as `feeLimit`, `value`, `tokenId`, `tokenValue`, and `permissionId`.
+- `walletClient.signMessage(...)` uses TRON `signMessageV2` semantics.
+- If you pass `account` into TronWeb `writeContract(...)`, it must match the account configured on the wallet client.
 
 ## FAQ
 

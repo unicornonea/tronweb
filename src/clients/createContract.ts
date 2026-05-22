@@ -1,8 +1,22 @@
-import { Contract } from '../lib/contract/index.js';
-import type { ContractAbiInterface, FunctionFragment, GetOnMethodTypeFromAbi } from '../types/ABI.js';
-import type { PublicClient, WalletClient } from './types.js';
+import type { ContractAbiInterface, EventFragment, FunctionFragment, GetOnMethodTypeFromAbi } from '../types/ABI.js';
+import type {
+    EstimateContractGasParameters,
+    EstimateContractGasReturnType,
+    GetContractEventsParameters,
+    GetContractEventsReturnType,
+    PublicClient,
+    ReadContractParameters,
+    ReadContractReturnType,
+    WalletClient,
+    WriteContractParameters,
+    WriteContractReturnType,
+} from './types.js';
 
 // ─── Helper types ────────────────────────────────────────────────────────────
+
+type ReservedContractInstanceKey = 'address' | 'abi' | 'read' | 'write' | 'estimateGas' | 'getEvents';
+
+type ContractFunctionClient = PublicClient | WalletClient;
 
 /** True if the fragment is a view or pure function (read-only, no state change) */
 type IsReadOnly<F> = F extends FunctionFragment
@@ -31,13 +45,83 @@ type WrappedMethod<OnMethodFn, Fragment> = OnMethodFn extends (...args: infer A)
         : (...args: A) => Promise<string>
     : (...args: any[]) => Promise<any>;
 
-type OnMethods<Abi extends ContractAbiInterface> = GetOnMethodTypeFromAbi<Abi>;
+type OnMethods<Abi extends ContractAbiInterface> = Omit<GetOnMethodTypeFromAbi<Abi>, ReservedContractInstanceKey>;
+
+type ReadFunctionName<Abi extends ContractAbiInterface> = Abi[number] extends infer Fragment
+    ? Fragment extends FunctionFragment
+        ? IsReadOnly<Fragment> extends true
+            ? Fragment['name']
+            : never
+        : never
+    : never;
+
+type WriteFunctionName<Abi extends ContractAbiInterface> = Abi[number] extends infer Fragment
+    ? Fragment extends FunctionFragment
+        ? IsReadOnly<Fragment> extends true
+            ? never
+            : Fragment['name']
+        : never
+    : never;
+
+type EventName<Abi extends ContractAbiInterface> = Abi[number] extends infer Fragment
+    ? Fragment extends EventFragment
+        ? Fragment['name']
+        : never
+    : never;
+
+type ReadOptions<
+    Abi extends ContractAbiInterface,
+    FunctionName extends ReadFunctionName<Abi>,
+> = Omit<ReadContractParameters<Abi, FunctionName>, 'address' | 'abi' | 'functionName' | 'args'>;
+
+type WriteOptions<
+    Abi extends ContractAbiInterface,
+    FunctionName extends WriteFunctionName<Abi>,
+> = Omit<WriteContractParameters<Abi, FunctionName>, 'address' | 'abi' | 'functionName' | 'args'>;
+
+type EstimateGasOptions<
+    Abi extends ContractAbiInterface,
+    FunctionName extends WriteFunctionName<Abi>,
+> = Omit<EstimateContractGasParameters<Abi, FunctionName>, 'address' | 'abi' | 'functionName' | 'args'>;
+
+type GetEventsOptions<
+    Abi extends ContractAbiInterface,
+    TEventName extends EventName<Abi>,
+> = Omit<GetContractEventsParameters<Abi, TEventName>, 'address' | 'abi' | 'eventName' | 'args'>;
+
+type ContractReadNamespace<Abi extends ContractAbiInterface> = {
+    [K in ReadFunctionName<Abi>]: (
+        argsOrOptions?: ReadContractParameters<Abi, K>['args'] | ReadOptions<Abi, K>,
+        options?: ReadOptions<Abi, K>
+    ) => Promise<ReadContractReturnType<Abi, K>>;
+};
+
+type ContractWriteNamespace<Abi extends ContractAbiInterface> = {
+    [K in WriteFunctionName<Abi>]: (
+        argsOrOptions?: WriteContractParameters<Abi, K>['args'] | WriteOptions<Abi, K>,
+        options?: WriteOptions<Abi, K>
+    ) => Promise<WriteContractReturnType>;
+};
+
+type ContractEstimateGasNamespace<Abi extends ContractAbiInterface> = {
+    [K in WriteFunctionName<Abi>]: (
+        argsOrOptions?: EstimateContractGasParameters<Abi, K>['args'] | EstimateGasOptions<Abi, K>,
+        options?: EstimateGasOptions<Abi, K>
+    ) => Promise<EstimateContractGasReturnType>;
+};
+
+type ContractGetEventsNamespace<Abi extends ContractAbiInterface> = {
+    [K in EventName<Abi>]: (
+        argsOrOptions?: GetContractEventsParameters<Abi, K>['args'] | readonly unknown[] | GetEventsOptions<Abi, K>,
+        options?: GetEventsOptions<Abi, K>
+    ) => Promise<GetContractEventsReturnType>;
+};
 
 /**
- * The result type of `createContract` — every ABI function mapped to a
+ * The result type of `getContract` — every ABI function mapped to a
  * directly-callable async function (no `.call()` / `.send()` needed).
  */
-export type ContractFunctions<Abi extends ContractAbiInterface> = {
+type FlatContractFunctions<Abi extends ContractAbiInterface> = {
     [K in keyof OnMethods<Abi>]: Abi extends readonly (infer F)[]
         ? F extends FunctionFragment
             ? F['name'] extends K
@@ -47,7 +131,38 @@ export type ContractFunctions<Abi extends ContractAbiInterface> = {
         : WrappedMethod<OnMethods<Abi>[K], never>;
 };
 
+export type ContractFunctions<
+    Abi extends ContractAbiInterface,
+    TClient extends ContractFunctionClient = ContractFunctionClient,
+> = FlatContractFunctions<Abi> & {
+    readonly address: string;
+    readonly abi: Abi;
+    readonly read: ContractReadNamespace<Abi>;
+    readonly estimateGas: ContractEstimateGasNamespace<Abi>;
+    readonly getEvents: ContractGetEventsNamespace<Abi>;
+} & (TClient extends WalletClient ? { readonly write: ContractWriteNamespace<Abi> } : Record<string, never>);
+
 // ─── Runtime ─────────────────────────────────────────────────────────────────
+
+const RESERVED_CONTRACT_INSTANCE_KEYS = new Set<ReservedContractInstanceKey>([
+    'address',
+    'abi',
+    'read',
+    'write',
+    'estimateGas',
+    'getEvents',
+]);
+
+const EVENT_OPTION_KEYS = new Set([
+    'blockNumber',
+    'fingerprint',
+    'limit',
+    'maxBlockTimestamp',
+    'minBlockTimestamp',
+    'onlyConfirmed',
+    'onlyUnconfirmed',
+    'orderBy',
+]);
 
 function isReadOnly(fragment: FunctionFragment): boolean {
     const sm = (fragment.stateMutability ?? '').toLowerCase();
@@ -57,8 +172,49 @@ function isReadOnly(fragment: FunctionFragment): boolean {
     return false;
 }
 
-function isWalletClient(client: PublicClient | WalletClient): client is WalletClient {
+function isWalletClient(client: ContractFunctionClient): client is WalletClient {
     return 'account' in client && typeof (client as WalletClient).sendTransaction === 'function';
+}
+
+function getFunctionParameters(values: [argsOrOptions?: readonly unknown[] | object, options?: object]) {
+    const hasArgs = values.length > 0 && Array.isArray(values[0]);
+    const args = hasArgs ? values[0]! : [];
+    const options = (hasArgs ? values[1] : values[0]) ?? {};
+    return { args, options };
+}
+
+function isEventOptions(value: unknown): boolean {
+    if (!value || Array.isArray(value) || typeof value !== 'object') return false;
+    return Object.keys(value).every((key) => EVENT_OPTION_KEYS.has(key));
+}
+
+function normalizeEventArgs(fragment: EventFragment, args: readonly unknown[] | Record<string, unknown> | undefined) {
+    if (!args) return undefined;
+    if (!Array.isArray(args)) return args;
+
+    const inputs = fragment.inputs ?? [];
+    const mapped: Record<string, unknown> = Object.create(null);
+
+    args.forEach((value, index) => {
+        const input = inputs[index];
+        if (!input || !input.name) {
+            throw new Error(`Event "${fragment.name}" args array requires named ABI inputs.`);
+        }
+        mapped[input.name] = value;
+    });
+
+    return mapped;
+}
+
+function getEventParameters(
+    values: [argsOrOptions?: Record<string, unknown> | readonly unknown[] | object, options?: object],
+    fragment: EventFragment
+) {
+    const first = values[0];
+    const hasArgs = values[1] !== undefined || Array.isArray(first) || (Boolean(first) && typeof first === 'object' && !isEventOptions(first));
+    const args = hasArgs ? normalizeEventArgs(fragment, first as readonly unknown[] | Record<string, unknown> | undefined) : undefined;
+    const options = (hasArgs ? values[1] : first) ?? {};
+    return { args, options };
 }
 
 /**
@@ -73,7 +229,7 @@ function isWalletClient(client: PublicClient | WalletClient): client is WalletCl
  *
  * @example
  * ```ts
- * const contract = createContract({ client: walletClient, abi: MyABI, address: 'TXx...' });
+ * const contract = getContract({ client: walletClient, abi: MyABI, address: 'TXx...' });
  *
  * // view/pure method → returns result directly
  * const balance = await contract.balanceOf('TXx...');
@@ -82,96 +238,159 @@ function isWalletClient(client: PublicClient | WalletClient): client is WalletCl
  * const txId = await contract.transfer('TXx...', 1000n);
  * ```
  */
-export function createContract<Abi extends ContractAbiInterface>({
+export function getContract<Abi extends ContractAbiInterface, TClient extends ContractFunctionClient>({
     client,
     abi,
     address,
 }: {
-    client: PublicClient | WalletClient;
+    client: TClient;
     abi: Abi;
     address: string;
-}): ContractFunctions<Abi> {
-    const tronWeb = client._tronWeb;
-    const contract = new Contract(tronWeb, abi, address);
+}): ContractFunctions<Abi, TClient> {
+    const result: Record<string, unknown> = Object.create(null);
+    const read: Record<string, unknown> = Object.create(null);
+    const estimateGas: Record<string, unknown> = Object.create(null);
+    const getEvents: Record<string, unknown> = Object.create(null);
+    const write: Record<string, unknown> = Object.create(null);
 
-    // Build a map of method-name → stateMutability for fast runtime lookup
-    const abiMap = new Map<string, FunctionFragment>();
+    const invokeRead = <FunctionName extends ReadFunctionName<Abi>>(
+        functionName: FunctionName,
+        args: ReadContractParameters<Abi, FunctionName>['args'],
+        options?: ReadOptions<Abi, FunctionName>
+    ) => {
+        return client.readContract({
+            address,
+            abi,
+            functionName,
+            args,
+            ...(options as object),
+        } as ReadContractParameters<Abi, FunctionName>);
+    };
+
+    const invokeWrite = <FunctionName extends WriteFunctionName<Abi>>(
+        functionName: FunctionName,
+        args: WriteContractParameters<Abi, FunctionName>['args'],
+        options?: WriteOptions<Abi, FunctionName>
+    ) => {
+        if (!isWalletClient(client)) {
+            throw new Error(
+                `Method "${String(functionName)}" modifies state and requires a WalletClient. Use createWalletClient() instead of createPublicClient().`
+            );
+        }
+
+        return client.writeContract({
+            address,
+            abi,
+            functionName,
+            args,
+            ...(options as object),
+        } as WriteContractParameters<Abi, FunctionName>);
+    };
+
+    const invokeEstimateGas = <FunctionName extends WriteFunctionName<Abi>>(
+        functionName: FunctionName,
+        args: EstimateContractGasParameters<Abi, FunctionName>['args'],
+        options?: EstimateGasOptions<Abi, FunctionName>
+    ) => {
+        return client.estimateContractGas({
+            address,
+            abi,
+            functionName,
+            args,
+            ...(options as object),
+        } as EstimateContractGasParameters<Abi, FunctionName>);
+    };
+
+    const invokeGetEvents = <TEventName extends EventName<Abi>>(
+        eventName: TEventName,
+        args: GetContractEventsParameters<Abi, TEventName>['args'],
+        options?: GetEventsOptions<Abi, TEventName>
+    ) => {
+        return client.getContractEvents({
+            address,
+            abi,
+            eventName,
+            ...(args !== undefined ? { args } : {}),
+            ...(options as object),
+        } as GetContractEventsParameters<Abi, TEventName>);
+    };
+
+    result.address = address;
+    result.abi = abi;
+    result.read = read;
+    result.estimateGas = estimateGas;
+    result.getEvents = getEvents;
+    if (isWalletClient(client)) {
+        result.write = write;
+    }
+
     for (const fragment of abi) {
         if (fragment.type === 'function' && 'name' in fragment) {
-            abiMap.set(fragment.name, fragment as FunctionFragment);
-        }
-    }
+            const name = fragment.name;
+            const writeFunctionName = name as WriteFunctionName<Abi>;
+            const readFunctionName = name as ReadFunctionName<Abi>;
+            const readOnly = isReadOnly(fragment as FunctionFragment);
 
-    const result: Record<string, (...args: any[]) => Promise<any>> = {};
+            if (readOnly) {
+                read[name] = (
+                    argsOrOptions?: ReadContractParameters<Abi, typeof readFunctionName>['args'] | ReadOptions<Abi, typeof readFunctionName>,
+                    options?: ReadOptions<Abi, typeof readFunctionName>
+                ) => {
+                    const parameters = getFunctionParameters([argsOrOptions as readonly unknown[] | object | undefined, options]);
+                    return invokeRead(readFunctionName, parameters.args as ReadContractParameters<Abi, typeof readFunctionName>['args'], parameters.options as ReadOptions<Abi, typeof readFunctionName>);
+                };
 
-    for (const [name, onMethodFn] of Object.entries(contract.methods)) {
-        const fragment = abiMap.get(name);
-        const readOnly = fragment ? isReadOnly(fragment) : false;
-
-        if (readOnly) {
-            // view / pure → call directly, return result
-            result[name] = async (...args: any[]) => {
-                return (onMethodFn as any)(...args).call();
-            };
-        } else {
-            // state-changing → sign and broadcast
-            result[name] = async (...args: any[]) => {
-                if (!isWalletClient(client)) {
-                    throw new Error(
-                        `Method "${name}" modifies state and requires a WalletClient. Use createWalletClient() instead of createPublicClient().`
+                if (!RESERVED_CONTRACT_INSTANCE_KEYS.has(name as ReservedContractInstanceKey)) {
+                    result[name] = (...args: unknown[]) => invokeRead(readFunctionName, args as ReadContractParameters<Abi, typeof readFunctionName>['args']);
+                }
+            } else {
+                estimateGas[name] = (
+                    argsOrOptions?: EstimateContractGasParameters<Abi, typeof writeFunctionName>['args'] | EstimateGasOptions<Abi, typeof writeFunctionName>,
+                    options?: EstimateGasOptions<Abi, typeof writeFunctionName>
+                ) => {
+                    const parameters = getFunctionParameters([argsOrOptions as readonly unknown[] | object | undefined, options]);
+                    return invokeEstimateGas(
+                        writeFunctionName,
+                        parameters.args as EstimateContractGasParameters<Abi, typeof writeFunctionName>['args'],
+                        parameters.options as EstimateGasOptions<Abi, typeof writeFunctionName>
                     );
+                };
+
+                if (isWalletClient(client)) {
+                    write[name] = (
+                        argsOrOptions?: WriteContractParameters<Abi, typeof writeFunctionName>['args'] | WriteOptions<Abi, typeof writeFunctionName>,
+                        options?: WriteOptions<Abi, typeof writeFunctionName>
+                    ) => {
+                        const parameters = getFunctionParameters([argsOrOptions as readonly unknown[] | object | undefined, options]);
+                        return invokeWrite(
+                            writeFunctionName,
+                            parameters.args as WriteContractParameters<Abi, typeof writeFunctionName>['args'],
+                            parameters.options as WriteOptions<Abi, typeof writeFunctionName>
+                        );
+                    };
                 }
 
-                const { account } = client;
-                const fromHex = tronWeb.address.toHex(account.address);
-
-                if (!fragment) {
-                    throw new Error(`ABI fragment not found for method "${name}"`);
+                if (!RESERVED_CONTRACT_INSTANCE_KEYS.has(name as ReservedContractInstanceKey)) {
+                    result[name] = (...args: unknown[]) => invokeWrite(writeFunctionName, args as WriteContractParameters<Abi, typeof writeFunctionName>['args']);
                 }
-
-                // Encode the call parameters using the existing Method machinery
-                const methodInstance = contract.methodInstances[name];
-                if (!methodInstance || !methodInstance.functionSelector) {
-                    throw new Error(`Method instance not found for "${name}"`);
-                }
-
-                const { encodeParamsV2ByABI } = await import('../utils/abi.js');
-                const rawParameter = encodeParamsV2ByABI(fragment, args);
-
-                const txWrapper = await tronWeb.transactionBuilder.triggerSmartContract(
-                    address,
-                    methodInstance.functionSelector,
-                    {
-                        feeLimit: tronWeb.feeLimit,
-                        callValue: 0,
-                        rawParameter,
-                        from: fromHex,
-                    } as any,
-                    [],
-                    fromHex
+            }
+        } else if (fragment.type === 'event' && 'name' in fragment) {
+            const eventName = fragment.name as EventName<Abi>;
+            getEvents[eventName] = (
+                argsOrOptions?: GetContractEventsParameters<Abi, typeof eventName>['args'] | readonly unknown[] | GetEventsOptions<Abi, typeof eventName>,
+                options?: GetEventsOptions<Abi, typeof eventName>
+            ) => {
+                const parameters = getEventParameters([argsOrOptions as Record<string, unknown> | readonly unknown[] | object | undefined, options], fragment as EventFragment);
+                return invokeGetEvents(
+                    eventName,
+                    parameters.args as GetContractEventsParameters<Abi, typeof eventName>['args'],
+                    parameters.options as GetEventsOptions<Abi, typeof eventName>
                 );
-
-                if (!txWrapper.result?.result) {
-                    throw new Error(
-                        'Failed to build transaction: ' +
-                            (txWrapper.result?.message ?? JSON.stringify(txWrapper))
-                    );
-                }
-
-                const signed = await account.signTransaction(txWrapper.transaction);
-                const broadcast = await tronWeb.trx.sendRawTransaction(signed);
-
-                if ((broadcast as any).code) {
-                    const msg = (broadcast as any).message
-                        ? tronWeb.toUtf8((broadcast as any).message)
-                        : (broadcast as any).code;
-                    throw new Error(msg);
-                }
-
-                return signed.txID;
             };
         }
     }
 
-    return result as unknown as ContractFunctions<Abi>;
+    return result as unknown as ContractFunctions<Abi, TClient>;
 }
+
+export const createContract = getContract;

@@ -5,17 +5,21 @@ import { fromHex, toHex } from '../../../src/utils/address.js';
 import { encodeParams } from '../../../src/utils/abi.js';
 import { createPublicClient } from '../../../src/clients/createPublicClient.js';
 import { createWalletClient } from '../../../src/clients/createWalletClient.js';
+import { getContract } from '../../../src/clients/getContract.js';
 import { mainnet, nile, shasta } from '../../../src/chains/index.js';
 import {
+    createContract as createContractFromRoot,
     createPublicClient as createPublicClientFromRoot,
     createWalletClient as createWalletClientFromRoot,
     defineChain,
+    getContract as getContractFromRoot,
     http,
 } from '../../../src/index.js';
 
 describe('client factories', function () {
     const fullHost = 'http://127.0.0.1';
-    const account = privateKeyToAccount(`0x${'1'.padStart(64, '0')}` as `0x${string}`);
+    const privateKey = `0x${'1'.padStart(64, '0')}` as `0x${string}`;
+    const account = privateKeyToAccount(privateKey);
     const testTypedData = {
         domain: {
             name: 'TronWeb Test',
@@ -81,6 +85,8 @@ describe('client factories', function () {
     it('exports client factories from the package root', function () {
         assert.strictEqual(createPublicClientFromRoot, createPublicClient);
         assert.strictEqual(createWalletClientFromRoot, createWalletClient);
+        assert.strictEqual(getContractFromRoot, getContract);
+        assert.strictEqual(createContractFromRoot, getContractFromRoot);
         assert.isFunction(defineChain);
         assert.isFunction(http);
     });
@@ -571,9 +577,230 @@ describe('client factories', function () {
         assert.isFunction(walletClient.verifyTypedData);
         assert.isFunction(walletClient.getBlockNumber);
         assert.isFunction(walletClient.getTransaction);
+        assert.isFunction(walletClient.getAddresses);
+        assert.isFunction(walletClient.requestAddresses);
+        assert.isFunction(walletClient.sendRawTransaction);
+        assert.isFunction(walletClient.signMessage);
+        assert.isFunction(walletClient.signTransaction);
+        assert.isFunction(walletClient.signTypedData);
+        assert.isFunction(walletClient.writeContract);
+        assert.isFunction(walletClient.deployContract);
         assert.isFunction(walletClient.sendTransaction);
         assert.isFunction(walletClient.trx.sendTransaction);
         assert.isFunction(walletClient.trx.sign);
+    });
+
+    it('createWalletClient signMessage keeps signMessageV2 semantics', async function () {
+        const walletClient = createWalletClient({
+            account,
+            fullHost,
+        });
+
+        const signature = await walletClient.signMessage({ message: 'hello tron' });
+
+        assert.equal(signature, walletClient.trx.signMessageV2('hello tron', privateKey));
+    });
+
+    it('covers new wallet client top-level actions', async function () {
+        const stubAccount = {
+            ...account,
+            async signTransaction(transaction: any) {
+                return {
+                    ...transaction,
+                    signature: ['0xsignature'],
+                };
+            },
+        };
+        const walletClient = createWalletClient({
+            account: stubAccount,
+            fullHost,
+        });
+        const directTransaction = {
+            txID: 'direct-tx-id',
+            raw_data: {
+                contract: [
+                    {
+                        parameter: {
+                            value: {
+                                owner_address: toHex(account.address),
+                            },
+                        },
+                    },
+                ],
+            },
+        } as any;
+        const signedInputTransaction = {
+            txID: 'signed-tx-id',
+            raw_data: {
+                contract: [],
+            },
+            signature: ['0xexisting'],
+        } as any;
+        const sendRawTransactionCalls: any[] = [];
+        let triggerSmartContractArgs: unknown[] | undefined;
+        let createSmartContractArgs: unknown[] | undefined;
+
+        walletClient._tronWeb.trx.sendRawTransaction = async (transaction) => {
+            sendRawTransactionCalls.push(transaction);
+            return {
+                txid: transaction.txID,
+                code: 0,
+                message: 'SUCCESS',
+                result: true,
+                transaction,
+            } as any;
+        };
+        walletClient._tronWeb.transactionBuilder.triggerSmartContract = async (...args: unknown[]) => {
+            triggerSmartContractArgs = args;
+            return {
+                result: { result: true },
+                transaction: {
+                    txID: 'write-tx-id',
+                    raw_data: {
+                        contract: [
+                            {
+                                parameter: {
+                                    value: {
+                                        owner_address: toHex(account.address),
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                },
+            } as any;
+        };
+        walletClient._tronWeb.transactionBuilder.createSmartContract = async (...args: unknown[]) => {
+            createSmartContractArgs = args;
+            return {
+                txID: 'deploy-tx-id',
+                raw_data: {
+                    contract: [
+                        {
+                            parameter: {
+                                value: {
+                                    owner_address: toHex(account.address),
+                                },
+                            },
+                        },
+                    ],
+                },
+            } as any;
+        };
+
+        assert.deepEqual(await walletClient.getAddresses(), [account.address]);
+        assert.deepEqual(await walletClient.requestAddresses(), [account.address]);
+        assert.deepEqual(await walletClient.signTransaction({ transaction: directTransaction }), {
+            ...directTransaction,
+            signature: ['0xsignature'],
+        });
+        assert.equal(await walletClient.signTypedData(testTypedData as any), await account.signTypedData(testTypedData as any));
+        assert.deepEqual(await walletClient.sendRawTransaction({ transaction: signedInputTransaction }), {
+            txid: signedInputTransaction.txID,
+            code: 0,
+            message: 'SUCCESS',
+            result: true,
+            transaction: signedInputTransaction,
+        });
+        assert.strictEqual(sendRawTransactionCalls[0], signedInputTransaction);
+
+        assert.equal(
+            await walletClient.writeContract({
+                address: 'TContractAddress',
+                abi: testWriteContractAbi,
+                functionName: 'transfer',
+                args: [account.address, 12],
+                value: 3n,
+                feeLimit: 1_000,
+                tokenId: '1000',
+                tokenValue: 2,
+                permissionId: 7,
+            }),
+            'write-tx-id'
+        );
+        assert.deepEqual(triggerSmartContractArgs, [
+            'TContractAddress',
+            'transfer(address,uint256)',
+            {
+                callValue: 3,
+                feeLimit: 1_000,
+                tokenId: '1000',
+                tokenValue: 2,
+                permissionId: 7,
+                funcABIV2: testWriteContractAbi[0],
+                parametersV2: [account.address, 12],
+            },
+            [],
+            account.address,
+        ]);
+        assert.equal(sendRawTransactionCalls[1].txID, 'write-tx-id');
+        assert.deepEqual(sendRawTransactionCalls[1].signature, ['0xsignature']);
+
+        assert.equal(
+            await walletClient.deployContract({
+                abi: testWriteContractAbi,
+                bytecode: '0x6080604052348015600f57600080fd5b50600080fdfe',
+                args: [account.address, 12],
+                name: 'Test Contract',
+                value: 4n,
+                feeLimit: 2_000,
+                tokenId: '1001',
+                tokenValue: 3,
+                userFeePercentage: 75,
+                originEnergyLimit: 12_345,
+                permissionId: 9,
+            }),
+            'deploy-tx-id'
+        );
+        assert.deepEqual(createSmartContractArgs, [
+            {
+                abi: testWriteContractAbi,
+                bytecode: '0x6080604052348015600f57600080fd5b50600080fdfe',
+                parameters: [account.address, 12],
+                name: 'Test Contract',
+                callValue: 4,
+                feeLimit: 2_000,
+                tokenId: '1001',
+                tokenValue: 3,
+                userFeePercentage: 75,
+                originEnergyLimit: 12_345,
+                permissionId: 9,
+            },
+            account.address,
+        ]);
+        assert.equal(sendRawTransactionCalls[2].txID, 'deploy-tx-id');
+        assert.deepEqual(sendRawTransactionCalls[2].signature, ['0xsignature']);
+
+        await assertRejectsWithMessage(
+            () =>
+                walletClient.writeContract({
+                    address: 'TContractAddress',
+                    abi: testReadContractAbi,
+                    functionName: 'balanceOf',
+                    args: [account.address],
+                } as any),
+            'Function "balanceOf" is read-only.'
+        );
+        await assertRejectsWithMessage(
+            () =>
+                walletClient.writeContract({
+                    address: 'TContractAddress',
+                    abi: testWriteContractAbi,
+                    functionName: 'transfer',
+                    args: [account.address, 1],
+                    account: fromHex('410000000000000000000000000000000000000000'),
+                }),
+            'Wallet client account override must match the configured account.'
+        );
+        await assertRejectsWithMessage(
+            () =>
+                walletClient.deployContract({
+                    abi: testWriteContractAbi,
+                    bytecode: '0x60',
+                    account: fromHex('410000000000000000000000000000000000000000'),
+                }),
+            'Wallet client account override must match the configured account.'
+        );
     });
 
     it('validates chain id and block transaction count inputs for new helpers', async function () {

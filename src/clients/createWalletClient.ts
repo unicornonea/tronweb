@@ -1,12 +1,76 @@
 import { TronWeb } from '../tronweb.js';
-import type { WalletClient, WalletClientConfig, SendTransactionParams } from './types.js';
+import type {
+    DeployContractParameters,
+    SendRawTransactionParameters,
+    SendTransactionParams,
+    SignTransactionParameters,
+    WalletClient,
+    WalletClientConfig,
+    WriteContractParameters,
+} from './types.js';
 import type { WalletAccount } from '../accounts/types.js';
+import type { ContractAbiInterface, FunctionFragment } from '../types/ABI.js';
 import type { TransactionBuilder } from '../lib/TransactionBuilder/TransactionBuilder.js';
-import type { SignedTransaction } from '../types/Transaction.js';
+import type { SignedTransaction, Transaction } from '../types/Transaction.js';
 import type { BroadcastReturn } from '../types/Trx.js';
+import { toHex } from '../utils/address.js';
 import { createClientQueryActions } from './createClientQueryActions.js';
 import { createClientMetadata } from './createClientMetadata.js';
 import { resolveClientConfig } from './resolveClientConfig.js';
+
+function isReadOnlyFunctionFragment(fragment: FunctionFragment): boolean {
+    const stateMutability = (fragment.stateMutability ?? '').toLowerCase();
+    return stateMutability === 'view' || stateMutability === 'pure' || fragment.constant === true;
+}
+
+function buildFunctionSelector(fragment: FunctionFragment): string {
+    const inputs = fragment.inputs ?? [];
+    return `${fragment.name}(${inputs.map((input) => input.type).join(',')})`;
+}
+
+function getWriteContractFragment<
+    Abi extends ContractAbiInterface,
+    FunctionName extends WriteContractParameters<Abi>['functionName'],
+>(abi: Abi, functionName: FunctionName): FunctionFragment {
+    const fragment = abi.find(
+        (item): item is FunctionFragment => item.type === 'function' && 'name' in item && item.name === functionName
+    );
+
+    if (!fragment) {
+        throw new Error(`ABI fragment not found for function "${String(functionName)}".`);
+    }
+
+    if (isReadOnlyFunctionFragment(fragment)) {
+        throw new Error(`Function "${String(functionName)}" is read-only.`);
+    }
+
+    return fragment;
+}
+
+function resolveCallValue(value: number | bigint | undefined): number | undefined {
+    if (value === undefined) return undefined;
+    return typeof value === 'bigint' ? Number(value) : value;
+}
+
+function resolveSignerAddress(account: WalletAccount, accountOverride: string | undefined): string {
+    if (accountOverride === undefined) return account.address;
+    if (toHex(accountOverride).toLowerCase() !== toHex(account.address).toLowerCase()) {
+        throw new Error('Wallet client account override must match the configured account.');
+    }
+    return accountOverride;
+}
+
+function getBroadcastErrorMessage(tronWeb: TronWeb, broadcast: Record<string, unknown>): string {
+    if (typeof broadcast.message === 'string' && broadcast.message.length > 0) {
+        return tronWeb.toUtf8(broadcast.message);
+    }
+
+    if (typeof broadcast.code === 'string' && broadcast.code.length > 0) {
+        return broadcast.code;
+    }
+
+    return 'Failed to broadcast transaction';
+}
 
 /**
  * Create a write-capable TronWeb client.
@@ -68,6 +132,125 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
         return tronWeb.trx.sendRawTransaction(signed);
     };
 
+    const getAddresses = async () => [account.address] as const;
+
+    const requestAddresses = async () => getAddresses();
+
+    const sendRawTransaction = async <TTransaction extends SignedTransaction = SignedTransaction>({
+        transaction,
+    }: SendRawTransactionParameters<TTransaction>) => tronWeb.trx.sendRawTransaction(transaction);
+
+    const signMessage = async (input: Parameters<TAccount['signMessage']>[0]) => account.signMessage(input);
+
+    const signTransaction = async <TTransaction extends Transaction = Transaction>({
+        transaction,
+    }: SignTransactionParameters<TTransaction>) => account.signTransaction(transaction);
+
+    const signTypedData = async (input: Parameters<TAccount['signTypedData']>[0]) => account.signTypedData(input);
+
+    const writeContract = async <
+        Abi extends ContractAbiInterface,
+        FunctionName extends WriteContractParameters<Abi>['functionName'],
+    >({
+        address,
+        abi,
+        functionName,
+        args,
+        account: accountOverride,
+        value,
+        feeLimit,
+        tokenId,
+        tokenValue,
+        permissionId,
+    }: WriteContractParameters<Abi, FunctionName>) => {
+        const signerAddress = resolveSignerAddress(account, accountOverride);
+        const fragment = getWriteContractFragment(abi, functionName);
+        const callValue = resolveCallValue(value);
+        const txWrapper = await tronWeb.transactionBuilder.triggerSmartContract(
+            address,
+            buildFunctionSelector(fragment),
+            {
+                ...(callValue !== undefined ? { callValue } : {}),
+                ...(feeLimit !== undefined ? { feeLimit } : {}),
+                ...(tokenId !== undefined ? { tokenId } : {}),
+                ...(tokenValue !== undefined ? { tokenValue } : {}),
+                ...(permissionId !== undefined ? { permissionId } : {}),
+                funcABIV2: fragment,
+                parametersV2: args,
+            },
+            [],
+            signerAddress
+        );
+
+        if (!txWrapper.result?.result) {
+            throw new Error('Failed to build transaction: ' + (txWrapper.result?.message ?? JSON.stringify(txWrapper)));
+        }
+
+        if (!txWrapper.transaction || !txWrapper.transaction.txID) {
+            throw new Error('transactionBuilder did not return a valid transaction object');
+        }
+
+        const signed = await account.signTransaction(txWrapper.transaction);
+        const broadcast = await tronWeb.trx.sendRawTransaction(signed);
+
+        if ((broadcast as any).code) {
+            throw new Error(getBroadcastErrorMessage(tronWeb, broadcast as unknown as Record<string, unknown>));
+        }
+
+        return signed.txID;
+    };
+
+    const deployContract = async <Abi extends ContractAbiInterface>({
+        abi,
+        bytecode,
+        args,
+        account: accountOverride,
+        name,
+        value,
+        feeLimit,
+        tokenId,
+        tokenValue,
+        userFeePercentage,
+        originEnergyLimit,
+        permissionId,
+        blockHeader,
+        rawParameter,
+    }: DeployContractParameters<Abi>) => {
+        const signerAddress = resolveSignerAddress(account, accountOverride);
+        const callValue = resolveCallValue(value);
+        const transaction = await tronWeb.transactionBuilder.createSmartContract(
+            {
+                abi,
+                bytecode,
+                ...(args !== undefined ? { parameters: [...args] } : {}),
+                ...(name !== undefined ? { name } : {}),
+                ...(callValue !== undefined ? { callValue } : {}),
+                ...(feeLimit !== undefined ? { feeLimit } : {}),
+                ...(tokenId !== undefined ? { tokenId } : {}),
+                ...(tokenValue !== undefined ? { tokenValue } : {}),
+                ...(userFeePercentage !== undefined ? { userFeePercentage } : {}),
+                ...(originEnergyLimit !== undefined ? { originEnergyLimit } : {}),
+                ...(permissionId !== undefined ? { permissionId } : {}),
+                ...(blockHeader !== undefined ? { blockHeader } : {}),
+                ...(rawParameter !== undefined ? { rawParameter } : {}),
+            },
+            signerAddress
+        );
+
+        if (!transaction || !transaction.txID) {
+            throw new Error('transactionBuilder did not return a valid transaction object');
+        }
+
+        const signed = await account.signTransaction(transaction);
+        const broadcast = await tronWeb.trx.sendRawTransaction(signed);
+
+        if ((broadcast as any).code) {
+            throw new Error(getBroadcastErrorMessage(tronWeb, broadcast as unknown as Record<string, unknown>));
+        }
+
+        return signed.txID;
+    };
+
     const metadata = createClientMetadata({
         key,
         name,
@@ -98,6 +281,14 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
         get account() {
             return account;
         },
+        getAddresses,
+        requestAddresses,
+        sendRawTransaction,
+        signMessage,
+        signTransaction,
+        signTypedData,
+        writeContract,
+        deployContract,
         sendTransaction,
     };
 

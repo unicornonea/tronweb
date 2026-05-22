@@ -34,8 +34,8 @@ export { defineChain };
 import { http } from './transports/index.js';
 export { http };
 
-import { createContract, createPublicClient, createWalletClient } from './clients/index.js';
-export { createContract, createPublicClient, createWalletClient };
+import { createContract, createPublicClient, createWalletClient, getContract } from './clients/index.js';
+export { createContract, createPublicClient, createWalletClient, getContract };
 
 import * as Types from './types/index.js';
 export { Types };
@@ -68,6 +68,7 @@ export default {
     http,
     createPublicClient,
     createWalletClient,
+    getContract,
     createContract,
     Types,
 };

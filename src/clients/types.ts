@@ -6,7 +6,7 @@ import type { Chain } from '../chains/index.js';
 import type { Transport } from '../transports/index.js';
 import type { ContractAbiInterface, EventFragment, FunctionFragment, GetOutputsType, GetParamsType } from '../types/ABI.js';
 import type { EventResponse, GetEventResultOptions } from '../types/Event.js';
-import type { SignedTransaction } from '../types/Transaction.js';
+import type { SignedTransaction, Transaction } from '../types/Transaction.js';
 import type { TronWebOptions } from '../types/TronWeb.js';
 import type { BroadcastReturn, TransactionInfo } from '../types/Trx.js';
 import type { ClientType } from './createClientMetadata.js';
@@ -144,6 +144,8 @@ type EstimateContractGasFunctionName<Abi extends ContractAbiInterface> = Abi[num
         : never
     : never;
 
+export type WriteContractFunctionName<Abi extends ContractAbiInterface> = EstimateContractGasFunctionName<Abi>;
+
 type ContractEventName<Abi extends ContractAbiInterface> = Abi[number] extends infer Fragment
     ? Fragment extends EventFragment
         ? Fragment['name']
@@ -171,6 +173,22 @@ type ReadContractOutputs<
     FunctionName extends ReadContractFunctionName<Abi>,
 > = ReadContractFragment<Abi, FunctionName> extends FunctionFragment
     ? ReadContractFragment<Abi, FunctionName>['outputs']
+    : undefined;
+
+type WriteContractFragment<
+    Abi extends ContractAbiInterface,
+    FunctionName extends WriteContractFunctionName<Abi>,
+> = Extract<Abi[number], { type: 'function'; name: FunctionName }> extends infer Fragment
+    ? Fragment extends FunctionFragment
+        ? Fragment
+        : never
+    : never;
+
+type WriteContractInputs<
+    Abi extends ContractAbiInterface,
+    FunctionName extends WriteContractFunctionName<Abi>,
+> = WriteContractFragment<Abi, FunctionName> extends FunctionFragment
+    ? WriteContractFragment<Abi, FunctionName>['inputs']
     : undefined;
 
 type CollapseSingleItemTuple<Value> = Value extends readonly [infer Only] ? Only : Value;
@@ -205,6 +223,59 @@ export type EstimateContractGasParameters<
 };
 
 export type EstimateContractGasReturnType = bigint;
+
+export interface GetAddressesReturnType extends ReadonlyArray<string> {}
+
+export interface RequestAddressesReturnType extends ReadonlyArray<string> {}
+
+export interface SendRawTransactionParameters<TTransaction extends SignedTransaction = SignedTransaction> {
+    readonly transaction: TTransaction;
+}
+
+export type SendRawTransactionReturnType<TTransaction extends SignedTransaction = SignedTransaction> = BroadcastReturn<TTransaction>;
+
+export interface SignTransactionParameters<TTransaction extends Transaction = Transaction> {
+    readonly transaction: TTransaction;
+}
+
+export type SignTransactionReturnType = SignedTransaction;
+
+export type WriteContractParameters<
+    Abi extends ContractAbiInterface = ContractAbiInterface,
+    FunctionName extends WriteContractFunctionName<Abi> = WriteContractFunctionName<Abi>,
+> = {
+    readonly address: string;
+    readonly abi: Abi;
+    readonly functionName: FunctionName;
+    readonly args?: GetParamsType<WriteContractInputs<Abi, FunctionName>>;
+    readonly account?: string;
+    readonly value?: number | bigint;
+    readonly feeLimit?: number;
+    readonly tokenId?: string;
+    readonly tokenValue?: number;
+    readonly permissionId?: number;
+};
+
+export type WriteContractReturnType = string;
+
+export type DeployContractParameters<Abi extends ContractAbiInterface = ContractAbiInterface> = {
+    readonly abi: Abi;
+    readonly bytecode: string;
+    readonly args?: readonly unknown[];
+    readonly account?: string;
+    readonly name?: string;
+    readonly value?: number | bigint;
+    readonly feeLimit?: number;
+    readonly tokenId?: string;
+    readonly tokenValue?: number;
+    readonly userFeePercentage?: number;
+    readonly originEnergyLimit?: number;
+    readonly permissionId?: number;
+    readonly blockHeader?: Partial<Transaction['raw_data']>;
+    readonly rawParameter?: string;
+};
+
+export type DeployContractReturnType = string;
 
 export type EventLog = NonNullable<EventResponse['data']>[number];
 
@@ -333,6 +404,25 @@ export interface WalletClient<TAccount extends WalletAccount = WalletAccount> ex
     readonly trx: Trx;
     /** The Account used for signing */
     readonly account: TAccount;
+    readonly getAddresses: () => Promise<GetAddressesReturnType>;
+    readonly requestAddresses: () => Promise<RequestAddressesReturnType>;
+    readonly sendRawTransaction: <TTransaction extends SignedTransaction = SignedTransaction>(
+        params: SendRawTransactionParameters<TTransaction>
+    ) => Promise<SendRawTransactionReturnType<TTransaction>>;
+    readonly signMessage: (input: { readonly message: SignableMessage }) => Promise<Hex>;
+    readonly signTransaction: <TTransaction extends Transaction = Transaction>(
+        params: SignTransactionParameters<TTransaction>
+    ) => Promise<SignTransactionReturnType>;
+    readonly signTypedData: (input: SignTypedDataParameters) => Promise<Hex>;
+    readonly writeContract: <
+        Abi extends ContractAbiInterface,
+        FunctionName extends WriteContractFunctionName<Abi>,
+    >(
+        input: WriteContractParameters<Abi, FunctionName>
+    ) => Promise<WriteContractReturnType>;
+    readonly deployContract: <Abi extends ContractAbiInterface>(
+        input: DeployContractParameters<Abi>
+    ) => Promise<DeployContractReturnType>;
     /**
      * Build, sign, and broadcast a transaction in a single call.
      *
