@@ -6,6 +6,8 @@ import { encodeParams } from '../../../src/utils/abi.js';
 import { createPublicClient } from '../../../src/clients/createPublicClient.js';
 import { createWalletClient } from '../../../src/clients/createWalletClient.js';
 import { getContract } from '../../../src/clients/getContract.js';
+import { PUBLIC_CLIENT_BLOCKED_TRX_METHODS } from '../../../src/clients/types.js';
+import { Trx } from '../../../src/lib/trx.js';
 import { mainnet, nile, shasta } from '../../../src/chains/index.js';
 import {
     createContract as createContractFromRoot,
@@ -181,6 +183,38 @@ describe('client factories', function () {
         assert.isUndefined((publicClient.trx as any).sendTransaction);
         assert.isUndefined((publicClient.trx as any).sign);
         assert.isUndefined((publicClient.trx as any).signMessage);
+    });
+
+    it('PUBLIC_CLIENT_BLOCKED_TRX_METHODS covers every unsafe-named method on Trx', function () {
+        // Guard against silently leaking new sign/send/broadcast helpers into PublicClient.
+        // Any method on Trx (or its prototype chain) whose name matches the unsafe naming
+        // convention below must appear in PUBLIC_CLIENT_BLOCKED_TRX_METHODS, or a new method
+        // could slip past the filter.
+        const unsafePattern = /^(_?sign|send|broadcast|freeze|unfreeze|multiSign|updateAccount)/;
+        const blocked = new Set<string>(PUBLIC_CLIENT_BLOCKED_TRX_METHODS);
+        const unsafeNames = new Set<string>();
+
+        let proto: object | null = Trx.prototype;
+        while (proto && proto !== Object.prototype) {
+            for (const key of Reflect.ownKeys(proto)) {
+                if (typeof key !== 'string') continue;
+                if (key === 'constructor') continue;
+                if (!unsafePattern.test(key)) continue;
+                const descriptor = Reflect.getOwnPropertyDescriptor(proto, key);
+                if (!descriptor) continue;
+                const isMethod = 'value' in descriptor && typeof descriptor.value === 'function';
+                if (!isMethod) continue;
+                unsafeNames.add(key);
+            }
+            proto = Object.getPrototypeOf(proto);
+        }
+
+        const leaks = [...unsafeNames].filter((name) => !blocked.has(name));
+        assert.deepEqual(
+            leaks,
+            [],
+            `Trx exposes unsafe-named method(s) not in PUBLIC_CLIENT_BLOCKED_TRX_METHODS: ${leaks.join(', ')}`
+        );
     });
 
     it('createPublicClient exposes top-level query helpers', async function () {
