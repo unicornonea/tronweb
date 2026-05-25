@@ -141,6 +141,15 @@ export class Trx {
         return transactions.length;
     }
 
+    async getChainId(): Promise<number> {
+        const genesis = await this.getBlockByNumber(0);
+        const blockId = genesis?.blockID;
+        if (typeof blockId !== 'string' || blockId.length < 8) {
+            throw new Error('Failed to derive chain id: invalid genesis block id');
+        }
+        return parseInt(blockId.slice(-8), 16);
+    }
+
     async getTransactionFromBlock(
         block: 'earliest' | 'latest' | number | string | false = this.tronWeb.defaultBlock,
         index: number
