@@ -876,6 +876,15 @@ describe('client factories', function () {
             () => publicClient.waitForTransactionReceipt({ hash: 'tx-timeout-id', pollingInterval: 0, timeout: 0 }),
             'Timed out waiting for transaction receipt for "tx-timeout-id".'
         );
+
+        const failingClient = createPublicClient({ fullHost });
+        failingClient._tronWeb.trx.getTransactionInfo = async () => {
+            throw new Error('node offline');
+        };
+        await assertRejectsWithMessage(
+            () => failingClient.waitForTransactionReceipt({ hash: 'tx-failing-id', pollingInterval: 0, timeout: 0 }),
+            'Timed out waiting for transaction receipt for "tx-failing-id". Last error: node offline'
+        );
     });
 
     it('covers verify helpers raw-message and mismatch branches', async function () {

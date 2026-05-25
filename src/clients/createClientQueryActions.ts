@@ -458,17 +458,27 @@ export function createClientQueryActions({ chain, tronWeb, trx }: CreateClientQu
             const pollingInterval = input.pollingInterval ?? 1_000;
             const timeout = input.timeout ?? 60_000;
             const startedAt = Date.now();
+            let lastError: unknown;
 
             while (true) {
                 try {
                     const receipt = await trx.getTransactionInfo(txId);
                     if (isTransactionInfoPopulated(receipt)) return receipt;
-                } catch {
-                    // Ignore not-found responses while polling.
+                } catch (error) {
+                    // Receipt may legitimately be missing while the tx is unconfirmed;
+                    // remember the most recent failure so the timeout error can surface it.
+                    lastError = error;
                 }
 
                 if (Date.now() - startedAt >= timeout) {
-                    throw new Error(`Timed out waiting for transaction receipt for "${txId}".`);
+                    const lastErrorMessage =
+                        lastError instanceof Error
+                            ? lastError.message
+                            : lastError !== undefined
+                              ? String(lastError)
+                              : undefined;
+                    const suffix = lastErrorMessage ? ` Last error: ${lastErrorMessage}` : '';
+                    throw new Error(`Timed out waiting for transaction receipt for "${txId}".${suffix}`);
                 }
 
                 await new Promise((resolve) => setTimeout(resolve, pollingInterval));
