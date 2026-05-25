@@ -15,8 +15,6 @@ describe('privateKeyToAccount', function () {
     const expectedAddress = 'TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC';
     const expectedPublicKey =
         '0x0479BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8';
-    const expectedHashSignature =
-        '0xe7c93726a865578504442b1a6827f676e0ed74bdff2be3960d1e253bbcfc44626aa772b878bc912bdbb33a0014ec507c4b3896ea85aa914b74dee9b7ac3e56da1c';
     const expectedMessageSignature =
         '0x0dc0b53d525e0103a6013061cf18e60cf158809149f2b8994a545af65a7004cb1eeaff560e801ab51b28df5d42549aa024c2aa7e9d34de1e01294b9afb5e6c7e1c';
     const expectedTypedDataSignature =
@@ -122,7 +120,7 @@ describe('privateKeyToAccount', function () {
         assert.equal(account.source, 'privateKey');
         assert.strictEqual(Object.getPrototypeOf(account), Object.prototype);
         assert.isTrue(account.publicKey.startsWith('0x04'));
-        assert.isFunction(account.sign);
+        assert.isUndefined((account as any).sign);
         assert.isFunction(account.signMessage);
         assert.isFunction(account.signTransaction);
         assert.isFunction(account.signTypedData);
@@ -131,7 +129,6 @@ describe('privateKeyToAccount', function () {
             'publicKey',
             'type',
             'source',
-            'sign',
             'signMessage',
             'signTransaction',
             'signTypedData',
@@ -155,12 +152,7 @@ describe('privateKeyToAccount', function () {
         );
     });
 
-    it('supports sign({ hash }) and object-style signMessage parameters', async function () {
-        const hash = `0x${'11'.repeat(32)}` as `0x${string}`;
-        const signaturePromise = account.sign({ hash });
-        const signature = await signaturePromise;
-        const recoveredHex = ecRecover(hash, signature);
-        const recoveredAddress = getBase58CheckAddress(hexStr2byteArray(recoveredHex));
+    it('supports object-style signMessage parameters', async function () {
         const rawHex = '0x47173285a8d7341e5e972fc677286384f802f8ef42a5ec5f03bbfa254cb01fad' as `0x${string}`;
         const rawBytes = new Uint8Array(hexStr2byteArray(rawHex.replace(/^0x/, ''), true));
         const textSignaturePromise = account.signMessage({ message: 'hello world' });
@@ -170,14 +162,14 @@ describe('privateKeyToAccount', function () {
         const rawHexSignature = await rawHexSignaturePromise;
         const rawBytesSignature = await rawBytesSignaturePromise;
 
-        assert.isTrue(signature.startsWith('0x'));
-        assert.instanceOf(signaturePromise, Promise);
-        assert.equal(signature, expectedHashSignature);
         assert.instanceOf(textSignaturePromise, Promise);
         assert.equal(textSignature, expectedMessageSignature);
-        assert.equal(recoveredAddress, account.address);
         assert.equal(verifyMessage('hello world', textSignature), account.address);
         assert.equal(rawHexSignature, rawBytesSignature);
+    });
+
+    it('does not expose a raw sign({ hash }) primitive', function () {
+        assert.isUndefined((account as any).sign);
     });
 
     it('supports object-style signTypedData parameters', async function () {
@@ -239,13 +231,4 @@ describe('privateKeyToAccount', function () {
         await assertRejectsWithMessage(() => account.signTransaction(transaction), 'Invalid transaction');
     });
 
-    it('rejects invalid sign hash input', async function () {
-        try {
-            await account.sign({ hash: '0x1' as any });
-            assert.fail('Expected sign({ hash }) to reject invalid hash input');
-        } catch (error) {
-            assert.instanceOf(error, Error);
-            assert.equal((error as Error).message, 'Invalid hash: must be a 0x-prefixed 32-byte hex string');
-        }
-    });
 });

@@ -11,10 +11,6 @@ export type SignableMessage =
           readonly raw: Hex | ByteArray;
       };
 
-export interface SignHashParameters {
-    readonly hash: Hex;
-}
-
 export interface SignMessageParameters {
     readonly message: SignableMessage;
 }
@@ -41,13 +37,6 @@ export interface Account {
     readonly source: AccountSource;
 
     /**
-     * Sign a 32-byte hash directly.
-     * @param params.hash - 32-byte hex hash
-     * @returns hex signature string (0x-prefixed)
-     */
-    sign(params: SignHashParameters): Hex;
-
-    /**
      * Sign a message using TRON message header.
      * @param params.message - string message or raw bytes wrapper
      * @returns hex signature string (0x-prefixed)
@@ -71,8 +60,7 @@ export interface Account {
 /**
  * A private key account with async message and typed-data signing.
  */
-export type PrivateKeyAccount = Omit<Account, 'sign' | 'signMessage' | 'signTransaction' | 'signTypedData'> & {
-    sign(params: SignHashParameters): Promise<Hex>;
+export type PrivateKeyAccount = Omit<Account, 'signMessage' | 'signTransaction' | 'signTypedData'> & {
     signMessage(params: SignMessageParameters): Promise<Hex>;
     signTransaction(transaction: Transaction): Promise<SignedTransaction>;
     signTypedData(params: SignTypedDataParameters): Promise<Hex>;

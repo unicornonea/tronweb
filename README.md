@@ -183,7 +183,6 @@ The returned account exposes:
 - `publicKey`
 - `type`
 - `source`
-- `sign({ hash })`
 - `signMessage({ message })`
 - `signTransaction(transaction)`
 - `signTypedData({ domain, types, primaryType, message })`

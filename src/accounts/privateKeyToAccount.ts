@@ -1,7 +1,6 @@
 import type {
     Hex,
     PrivateKeyAccount,
-    SignHashParameters,
     SignableMessage,
     SignMessageParameters,
     SignTypedDataParameters,
@@ -18,25 +17,12 @@ import { signMessage as cryptoSignMessage } from '../utils/message.js';
 import { signTypedData as cryptoSignTypedData } from '../utils/typedData.js';
 import { txCheck } from '../utils/transaction.js';
 import { hexStr2byteArray, byteArray2hexStr } from '../utils/code.js';
-import { SigningKey, joinSignature } from '../utils/ethersUtils.js';
 
 function normalizePrivateKey(privateKey: string): Hex {
     if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey)) {
         throw new Error('Invalid private key: must be a 0x-prefixed 32-byte hex string');
     }
     return privateKey as Hex;
-}
-
-function normalizeHash(hash: string): Hex {
-    if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
-        throw new Error('Invalid hash: must be a 0x-prefixed 32-byte hex string');
-    }
-    return hash as Hex;
-}
-
-function signHash(hash: Hex, privateKey: Hex): Hex {
-    const signingKey = new SigningKey(privateKey);
-    return joinSignature(signingKey.sign(normalizeHash(hash))) as Hex;
 }
 
 function normalizeRawMessage(raw: Hex | Uint8Array): Uint8Array {
@@ -105,9 +91,6 @@ export function privateKeyToAccount(privateKey: Hex): PrivateKeyAccount {
         publicKey,
         type: 'local',
         source: 'privateKey',
-        async sign({ hash }: SignHashParameters): Promise<Hex> {
-            return signHash(hash, normalizedPrivateKey);
-        },
         async signMessage({ message }: SignMessageParameters): Promise<Hex> {
             return cryptoSignMessage(resolveMessageInput(message), normalizedPrivateKey) as Hex;
         },

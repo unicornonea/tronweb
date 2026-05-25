@@ -4,7 +4,6 @@ export type {
 	AccountType,
 	ByteArray,
 	Hex,
-	SignHashParameters,
 	SignMessageParameters,
 	SignableMessage,
 	SignTypedDataParameters,
