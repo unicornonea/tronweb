@@ -1,4 +1,3 @@
-import type { TronWeb } from '../tronweb.js';
 import type { TransactionBuilder } from '../lib/TransactionBuilder/TransactionBuilder.js';
 import type { Trx } from '../lib/trx.js';
 import type { Hex, SignTypedDataParameters, SignableMessage, WalletAccount } from '../accounts/types.js';
@@ -381,12 +380,10 @@ export interface PublicClient extends ClientMetadata, PublicClientActions {
     readonly chain?: Chain;
     /** Selected transport, if configured */
     readonly transport?: Transport;
-    /** Filtered read-only access to tronWeb.trx */
+    /** Filtered access to tronWeb.trx (write methods removed) */
     readonly trx: PublicClientTrx;
     /** Direct access to tronWeb.transactionBuilder (unsigned tx building) */
     readonly transactionBuilder: TransactionBuilder;
-    /** @internal The underlying TronWeb instance; used by createContract */
-    readonly _tronWeb: TronWeb;
 }
 
 /**

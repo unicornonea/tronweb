@@ -4,6 +4,53 @@ import type { TronWebOptions } from '../types/TronWeb.js';
 import type { Chain } from '../chains/index.js';
 import { http } from '../transports/http.js';
 import type { HttpTransport, Transport } from '../transports/types.js';
+import type { TronWeb } from '../tronweb.js';
+
+const CLIENT_DISABLED_TRONWEB_MUTATORS = [
+    'setPrivateKey',
+    'setAddress',
+    'setFullNode',
+    'setSolidityNode',
+    'setEventServer',
+    'setDefaultBlock',
+] as const;
+
+export function disableClientTronWebMutators(tronWeb: TronWeb): TronWeb {
+    for (const name of CLIENT_DISABLED_TRONWEB_MUTATORS) {
+        Object.defineProperty(tronWeb, name, {
+            value: () => {
+                throw new Error(
+                    `${name} is disabled on a client-managed TronWeb instance. ` +
+                        'Client configuration is immutable after creation; build a new client with the desired settings instead.'
+                );
+            },
+            writable: false,
+            configurable: false,
+        });
+    }
+    // Defence in depth: even if a privateKey leaked into the constructor before
+    // setPrivateKey was locked, scrub defaultPrivateKey and freeze the slot so
+    // trx.sign(...) (which defaults to this.tronWeb.defaultPrivateKey) cannot
+    // backdoor-sign.
+    Object.defineProperty(tronWeb, 'defaultPrivateKey', {
+        value: '',
+        writable: false,
+        configurable: false,
+    });
+    // Lock the provider fields too. The locked setters above prevent
+    // setFullNode / setSolidityNode / setEventServer from being called, but the
+    // backing fields are plain writable properties and `event.setServer(...)`
+    // mutates `this.tronWeb.eventServer` directly — freezing the slots closes
+    // that path as well.
+    for (const field of ['fullNode', 'solidityNode', 'eventServer'] as const) {
+        Object.defineProperty(tronWeb, field, {
+            value: tronWeb[field],
+            writable: false,
+            configurable: false,
+        });
+    }
+    return tronWeb;
+}
 
 type ResolvedHttpTransport = HttpTransport & { url: string };
 
@@ -44,7 +91,17 @@ function resolveHttpTransport(chain?: Chain, transport?: Transport): ResolvedHtt
 }
 
 export function resolveClientConfig(config: ClientConfigWithTransport): ResolvedClientConfig {
-    const { chain, transport, key: _key, name: _name, ...tronWebConfig } = config;
+    // Strip the client-only fields plus any `privateKey` smuggled in via `as any`.
+    // The Omit on ClientConfigWithTransport is type-only — runtime guard is required
+    // so a stray privateKey never reaches the underlying TronWeb constructor.
+    const {
+        chain,
+        transport,
+        key: _key,
+        name: _name,
+        privateKey: _privateKey,
+        ...tronWebConfig
+    } = config as ClientConfigWithTransport & { privateKey?: unknown };
 
     if (hasExplicitNodeConfig(tronWebConfig)) {
         return {

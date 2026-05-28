@@ -16,7 +16,7 @@ import type { BroadcastReturn } from '../types/Trx.js';
 import { toHex } from '../utils/address.js';
 import { createClientQueryActions } from './createClientQueryActions.js';
 import { createClientMetadata } from './createClientMetadata.js';
-import { resolveClientConfig } from './resolveClientConfig.js';
+import { disableClientTronWebMutators, resolveClientConfig } from './resolveClientConfig.js';
 
 function isReadOnlyFunctionFragment(fragment: FunctionFragment): boolean {
     const stateMutability = (fragment.stateMutability ?? '').toLowerCase();
@@ -72,6 +72,12 @@ function getBroadcastErrorMessage(tronWeb: TronWeb, broadcast: Record<string, un
     return 'Failed to broadcast transaction';
 }
 
+function assertBroadcastOk(tronWeb: TronWeb, broadcast: unknown): void {
+    if (broadcast && typeof broadcast === 'object' && (broadcast as { code?: unknown }).code) {
+        throw new Error(getBroadcastErrorMessage(tronWeb, broadcast as Record<string, unknown>));
+    }
+}
+
 /**
  * Create a write-capable TronWeb client.
  *
@@ -101,6 +107,7 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
     // but we never pass the raw private key — signing always goes through account.signTransaction().
     const tronWeb = new TronWeb({ ...tronWebConfig });
     tronWeb.setAddress(account.address);
+    disableClientTronWebMutators(tronWeb);
 
     const sendTransaction = async <K extends keyof TransactionBuilder>(
         params: SendTransactionParams<K>
@@ -128,8 +135,10 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
         // Sign with the account (private key stays encapsulated)
         const signed = await account.signTransaction(transaction);
 
-        // Broadcast
-        return tronWeb.trx.sendRawTransaction(signed);
+        // Broadcast — surface broadcast errors consistently with writeContract / deployContract
+        const broadcast = await tronWeb.trx.sendRawTransaction(signed);
+        assertBroadcastOk(tronWeb, broadcast);
+        return broadcast;
     };
 
     const getAddresses = async () => [account.address] as const;
@@ -192,10 +201,7 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
 
         const signed = await account.signTransaction(txWrapper.transaction);
         const broadcast = await tronWeb.trx.sendRawTransaction(signed);
-
-        if ((broadcast as any).code) {
-            throw new Error(getBroadcastErrorMessage(tronWeb, broadcast as unknown as Record<string, unknown>));
-        }
+        assertBroadcastOk(tronWeb, broadcast);
 
         return signed.txID;
     };
@@ -243,10 +249,7 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
 
         const signed = await account.signTransaction(transaction);
         const broadcast = await tronWeb.trx.sendRawTransaction(signed);
-
-        if ((broadcast as any).code) {
-            throw new Error(getBroadcastErrorMessage(tronWeb, broadcast as unknown as Record<string, unknown>));
-        }
+        assertBroadcastOk(tronWeb, broadcast);
 
         return signed.txID;
     };
@@ -274,9 +277,6 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
         },
         get transactionBuilder() {
             return tronWeb.transactionBuilder;
-        },
-        get _tronWeb() {
-            return tronWeb;
         },
         get account() {
             return account;

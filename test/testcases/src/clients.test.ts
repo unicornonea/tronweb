@@ -17,6 +17,17 @@ import {
     getContract as getContractFromRoot,
     http,
 } from '../../../src/index.js';
+import type { PublicClient, WalletClient } from '../../../src/clients/types.js';
+import type { TronWeb } from '../../../src/tronweb.js';
+
+// The client surface intentionally hides the underlying TronWeb instance, so production
+// code cannot mutate node config or signing state after construction. Tests still need a
+// seam to stub trx methods deterministically; `TransactionBuilder` already holds a
+// (TS-private) back-reference to the owning TronWeb, so we route through it instead of
+// widening the public surface.
+function getInnerTronWeb(client: PublicClient | WalletClient): TronWeb {
+    return (client.transactionBuilder as unknown as { tronWeb: TronWeb }).tronWeb;
+}
 
 describe('client factories', function () {
     const fullHost = 'http://127.0.0.1';
@@ -112,9 +123,6 @@ describe('client factories', function () {
             assert.equal(publicClient.chain?.id, expectedId);
             assert.equal(publicClient.transport?.type, 'http');
             assert.equal(publicClient.transport?.url, expectedHost);
-            assert.equal(publicClient._tronWeb.fullNode.host, expectedHost);
-            assert.equal(publicClient._tronWeb.solidityNode.host, expectedHost);
-            assert.equal(publicClient._tronWeb.eventServer?.host, expectedHost);
         }
     });
 
@@ -129,7 +137,6 @@ describe('client factories', function () {
         assert.equal(publicClient.key, 'custom-public');
         assert.equal(publicClient.name, 'Custom Public Client');
         assert.equal(publicClient.transport?.url, 'https://nile.trongrid.io');
-        assert.equal(publicClient._tronWeb.fullNode.host, 'https://nile.trongrid.io');
     });
 
     it('assigns a unique uid to each client instance', function () {
@@ -163,7 +170,6 @@ describe('client factories', function () {
         assert.strictEqual(publicClient.chain, privateChain);
         assert.equal(publicClient.chain?.id, 728_126_428);
         assert.equal(publicClient.transport?.url, 'https://private.trongrid.local');
-        assert.equal(publicClient._tronWeb.fullNode.host, 'https://private.trongrid.local');
     });
 
     it('createPublicClient filters write helpers from trx', function () {
@@ -214,6 +220,17 @@ describe('client factories', function () {
             leaks,
             [],
             `Trx exposes unsafe-named method(s) not in PUBLIC_CLIENT_BLOCKED_TRX_METHODS: ${leaks.join(', ')}`
+        );
+    });
+
+    it('freezes publicClient.trx so callers cannot monkey-patch the filtered proxy', function () {
+        const publicClient = createPublicClient({ fullHost });
+        assert.isTrue(Object.isFrozen(publicClient.trx));
+        assert.throws(
+            () => {
+                (publicClient.trx as any).getCurrentBlock = async () => ({} as any);
+            },
+            TypeError
         );
     });
 
@@ -364,20 +381,21 @@ describe('client factories', function () {
         const messageSignature = await account.signMessage({ message: 'hello tron' });
         const typedDataSignature = await account.signTypedData(typedData as any);
 
-        publicClient._tronWeb.trx.getBlock = async (input) => {
+        const innerTronWeb = getInnerTronWeb(publicClient);
+        innerTronWeb.trx.getBlock = async (input) => {
             blockArg = input;
             return block as any;
         };
-        publicClient._tronWeb.trx.getBlockTransactionCount = async (input) => {
+        innerTronWeb.trx.getBlockTransactionCount = async (input) => {
             blockTransactionCountArg = input;
             return 7;
         };
-        publicClient._tronWeb.trx.getCurrentBlock = async () => block as any;
-        publicClient._tronWeb.trx.getTransaction = async (input) => {
+        innerTronWeb.trx.getCurrentBlock = async () => block as any;
+        innerTronWeb.trx.getTransaction = async (input) => {
             transactionArg = input;
             return transaction as any;
         };
-        publicClient._tronWeb.trx.getTransactionInfo = async (input) => {
+        innerTronWeb.trx.getTransactionInfo = async (input) => {
             transactionInfoArg = input;
             if (input === 'tx-wait-id') {
                 transactionInfoCallCount += 1;
@@ -387,15 +405,15 @@ describe('client factories', function () {
             }
             return transactionInfo;
         };
-        publicClient._tronWeb.trx.getAccount = async (input) => {
+        innerTronWeb.trx.getAccount = async (input) => {
             accountArg = input;
             return accountData;
         };
-        publicClient._tronWeb.trx.getBalance = async (input) => {
+        innerTronWeb.trx.getBalance = async (input) => {
             balanceArg = input;
             return 123;
         };
-        publicClient._tronWeb.transactionBuilder.triggerConstantContract = async (...args: unknown[]) => {
+        publicClient.transactionBuilder.triggerConstantContract = async (...args: unknown[]) => {
             constantCallArgs = args;
             const functionSelector = args[1] as string;
 
@@ -413,14 +431,14 @@ describe('client factories', function () {
                 constant_result: [encodeParams(['uint256'], [42]).replace(/^0x/, '')],
             } as any;
         };
-        publicClient._tronWeb.transactionBuilder.estimateEnergy = async (...args: unknown[]) => {
+        publicClient.transactionBuilder.estimateEnergy = async (...args: unknown[]) => {
             estimateEnergyArgs = args;
             return {
                 result: { result: true },
                 energy_required: 88,
             } as any;
         };
-        publicClient._tronWeb.event.getEventsByContractAddress = async (...args: unknown[]) => {
+        innerTronWeb.event.getEventsByContractAddress = async (...args: unknown[]) => {
             eventLogsArgs = args;
             return eventResponse as any;
         };
@@ -596,7 +614,6 @@ describe('client factories', function () {
         assert.isString(walletClient.uid);
         assert.isNotEmpty(walletClient.uid);
         assert.equal(walletClient.transport?.url, 'https://nile.trongrid.io');
-        assert.equal(walletClient._tronWeb.fullNode.host, 'https://nile.trongrid.io');
         assert.equal(walletClient.account, account);
         assert.isFunction(walletClient.getChainId);
         assert.isFunction(walletClient.getBlockTransactionCount);
@@ -674,7 +691,7 @@ describe('client factories', function () {
         let triggerSmartContractArgs: unknown[] | undefined;
         let createSmartContractArgs: unknown[] | undefined;
 
-        walletClient._tronWeb.trx.sendRawTransaction = async (transaction) => {
+        walletClient.trx.sendRawTransaction = async (transaction) => {
             sendRawTransactionCalls.push(transaction);
             return {
                 txid: transaction.txID,
@@ -684,7 +701,7 @@ describe('client factories', function () {
                 transaction,
             } as any;
         };
-        walletClient._tronWeb.transactionBuilder.triggerSmartContract = async (...args: unknown[]) => {
+        walletClient.transactionBuilder.triggerSmartContract = async (...args: unknown[]) => {
             triggerSmartContractArgs = args;
             return {
                 result: { result: true },
@@ -704,7 +721,7 @@ describe('client factories', function () {
                 },
             } as any;
         };
-        walletClient._tronWeb.transactionBuilder.createSmartContract = async (...args: unknown[]) => {
+        walletClient.transactionBuilder.createSmartContract = async (...args: unknown[]) => {
             createSmartContractArgs = args;
             return {
                 txID: 'deploy-tx-id',
@@ -837,11 +854,50 @@ describe('client factories', function () {
         );
     });
 
+    it('throws when sendTransaction broadcast returns a code, matching writeContract / deployContract', async function () {
+        const stubAccount = {
+            ...account,
+            async signTransaction(transaction: any) {
+                return { ...transaction, signature: ['0xsignature'] };
+            },
+        };
+        const walletClient = createWalletClient({ account: stubAccount, fullHost });
+
+        walletClient.transactionBuilder.sendTrx = (async () => ({
+            txID: 'send-trx-id',
+            raw_data: {
+                contract: [
+                    {
+                        parameter: {
+                            value: {
+                                owner_address: toHex(account.address),
+                            },
+                        },
+                    },
+                ],
+            },
+        })) as any;
+        walletClient.trx.sendRawTransaction = (async () => ({
+            code: 'SIGERROR',
+            // hex-encoded 'bad-sig'; tronWeb.toUtf8 decodes the message for the thrown error.
+            message: '6261642d736967',
+        })) as any;
+
+        await assertRejectsWithMessage(
+            () =>
+                walletClient.sendTransaction({
+                    type: 'sendTrx',
+                    parameters: [account.address, 1, account.address],
+                }),
+            'bad-sig'
+        );
+    });
+
     it('validates chain id and block transaction count inputs for new helpers', async function () {
         const publicClient = createPublicClient({ fullHost });
         let blockTransactionCountArg: unknown;
 
-        publicClient._tronWeb.trx.getBlockTransactionCount = async (input) => {
+        getInnerTronWeb(publicClient).trx.getBlockTransactionCount = async (input) => {
             blockTransactionCountArg = input;
             return 9;
         };
@@ -862,7 +918,7 @@ describe('client factories', function () {
     it('validates transaction receipt helper inputs and timeout behavior', async function () {
         const publicClient = createPublicClient({ fullHost });
 
-        publicClient._tronWeb.trx.getTransactionInfo = async () => ({} as any);
+        getInnerTronWeb(publicClient).trx.getTransactionInfo = async () => ({} as any);
 
         await assertRejectsWithMessage(
             () => publicClient.getTransactionReceipt({} as any),
@@ -878,9 +934,10 @@ describe('client factories', function () {
         );
 
         const failingClient = createPublicClient({ fullHost });
-        failingClient._tronWeb.trx.getTransactionInfo = async () => {
+        getInnerTronWeb(failingClient).trx.getTransactionInfo = async () => {
             throw new Error('node offline');
         };
+
         await assertRejectsWithMessage(
             () => failingClient.waitForTransactionReceipt({ hash: 'tx-failing-id', pollingInterval: 0, timeout: 0 }),
             'Timed out waiting for transaction receipt for "tx-failing-id". Last error: node offline'
@@ -925,24 +982,19 @@ describe('client factories', function () {
         const publicClient = createPublicClient({ fullHost });
         let callArgs: unknown[] | undefined;
 
-        publicClient._tronWeb.transactionBuilder.triggerConstantContract = async (...args: unknown[]) => {
+        publicClient.transactionBuilder.triggerConstantContract = async (...args: unknown[]) => {
             callArgs = args;
             return {
                 result: { result: true },
-                transaction: {
-                    raw_data: { contract: [] },
-                    raw_data_hex: '0xraw',
-                    txID: 'tx-id',
-                },
+                // 8 hex chars = revert selector with no payload; triggers the
+                // "len % 64 === 8" revert path in extractConstantResultData.
                 constant_result: ['08c379a0'],
+                transaction: {} as any,
             } as any;
         };
-        publicClient._tronWeb.transactionBuilder.estimateEnergy = async () => {
-            return {
-                result: { result: false },
-                energy_required: 0,
-            } as any;
-        };
+        publicClient.transactionBuilder.estimateEnergy = (async () => ({
+            result: { result: false, message: '' },
+        })) as any;
 
         await assertRejectsWithMessage(
             () =>
@@ -988,37 +1040,14 @@ describe('client factories', function () {
 
     it('covers getLogs and getContractEvents edge cases for event queries', async function () {
         const publicClient = createPublicClient({ fullHost });
-        const eventResponse = {
-            success: true,
-            data: [
-                {
-                    block_number: 901,
-                    block_timestamp: 1_700_000_000_000,
-                    caller_contract_address: 'TCallerAddress',
-                    contract_address: 'TContractAddress',
-                    event_index: 0,
-                    event_name: 'Transfer',
-                    result: {
-                        from: toHex(account.address),
-                        to: '410000000000000000000000000000000000000000',
-                        value: '12',
-                    },
-                    result_type: {
-                        from: 'address',
-                        to: 'address',
-                        value: 'uint256',
-                    },
-                    event: 'Transfer(address,address,uint256)',
-                    transaction_id: 'event-tx-id-1',
-                    _unconfirmed: false,
-                },
-            ],
-        };
 
-        publicClient._tronWeb.event.getEventsByContractAddress = async () => ({ success: true } as any);
+        getInnerTronWeb(publicClient).event.getEventsByContractAddress = (async () => ({
+            success: true,
+            data: [],
+        })) as any;
+
         assert.deepEqual(await publicClient.getLogs({ address: 'TContractAddress' }), { data: [] });
 
-        publicClient._tronWeb.event.getEventsByContractAddress = async () => eventResponse as any;
         await assertRejectsWithMessage(
             () =>
                 publicClient.getContractEvents({

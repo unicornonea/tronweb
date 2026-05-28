@@ -8,11 +8,14 @@ import {
 } from './types.js';
 import { createClientMetadata } from './createClientMetadata.js';
 import { createClientQueryActions } from './createClientQueryActions.js';
-import { resolveClientConfig } from './resolveClientConfig.js';
+import { disableClientTronWebMutators, resolveClientConfig } from './resolveClientConfig.js';
 
 const publicClientBlockedTrxMethods = new Set<PropertyKey>(PUBLIC_CLIENT_BLOCKED_TRX_METHODS);
 
 function createPublicClientTrx(trx: Trx): PublicClientTrx {
+    // Build a frozen filtered proxy: write methods are stripped via the block
+    // list, and the surface itself is non-writable + frozen so callers cannot
+    // monkey-patch the read methods.
     const publicTrx: Record<PropertyKey, unknown> = {};
     let prototype = Object.getPrototypeOf(trx);
 
@@ -29,7 +32,7 @@ function createPublicClientTrx(trx: Trx): PublicClientTrx {
                 Object.defineProperty(publicTrx, key, {
                     configurable: false,
                     enumerable: true,
-                    value: value.bind(trx),
+                    value: (value as (...args: unknown[]) => unknown).bind(trx),
                     writable: false,
                 });
                 continue;
@@ -67,7 +70,7 @@ function createPublicClientTrx(trx: Trx): PublicClientTrx {
 export function createPublicClient(config: PublicClientConfig): PublicClient {
     const { key, name } = config;
     const { chain, transport, tronWebConfig } = resolveClientConfig(config);
-    const tronWeb = new TronWeb({ ...tronWebConfig });
+    const tronWeb = disableClientTronWebMutators(new TronWeb({ ...tronWebConfig }));
     const publicTrx = createPublicClientTrx(tronWeb.trx);
     const metadata = createClientMetadata({
         key,
@@ -92,9 +95,6 @@ export function createPublicClient(config: PublicClientConfig): PublicClient {
         },
         get transactionBuilder() {
             return tronWeb.transactionBuilder;
-        },
-        get _tronWeb() {
-            return tronWeb;
         },
     };
 
