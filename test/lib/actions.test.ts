@@ -7,11 +7,43 @@ import { TransactionBuilder } from '../../src/lib/TransactionBuilder/Transaction
 import * as tbActions from '../../src/lib/actions/transactionBuilder.js';
 import * as trxActions from '../../src/lib/actions/trx.js';
 import * as eventActions from '../../src/lib/actions/event.js';
+import { privateKeyToAccount } from '../../src/accounts/privateKeyToAccount.js';
 import { HttpProvider } from '../../src/lib/providers/index.js';
 import config from '../helpers/config.js';
 import { Address } from '../../src/types/Trx.js';
+import Contracts from '../fixtures/contracts';
 
 const { FULL_NODE_API } = config;
+
+// A faithful class-wrapper delegate must either build the SAME transaction as the
+// underlying action (given the same fixed ref-block) or fail in exactly the same way.
+// The wrapper adds no logic of its own, so any divergence here is a regression.
+async function assertBuilderParity(
+    classCall: () => Promise<any>,
+    actionCall: () => Promise<any>
+): Promise<void> {
+    let classRes: any;
+    let actionRes: any;
+    let classErr: Error | undefined;
+    let actionErr: Error | undefined;
+    try {
+        classRes = await classCall();
+    } catch (e) {
+        classErr = e as Error;
+    }
+    try {
+        actionRes = await actionCall();
+    } catch (e) {
+        actionErr = e as Error;
+    }
+    if (classErr || actionErr) {
+        assert.isDefined(classErr, `class wrapper resolved but action threw: ${actionErr?.message}`);
+        assert.isDefined(actionErr, `action resolved but class wrapper threw: ${classErr?.message}`);
+        assert.strictEqual(classErr!.message, actionErr!.message);
+    } else {
+        assert.deepEqual(classRes, actionRes);
+    }
+}
 
 describe('action layer', function () {
     let accounts: { hex: Address[]; b58: Address[]; pks: string[] };
@@ -264,6 +296,240 @@ describe('action layer', function () {
                 { blockHeader: ref as any }
             );
             assert.deepEqual(fromClass, fromAction);
+        });
+    });
+
+    // ----------- extended parity: every extracted builder action vs its class wrapper -----------
+    // Each method is given the SAME fixed ref-block on both sides, so a faithful delegate must
+    // produce a byte-identical tx. Optional middle params are passed explicitly so the trailing
+    // { blockHeader } always lands in the options slot. Methods that need on-chain state to
+    // *build* may reject — the wrapper and action must then reject identically (see helper).
+
+    describe('class-wrapper / action parity — extended builders (fixed ref-block)', function () {
+        const cases: Array<{ name: string; args: () => unknown[] }> = [
+            { name: 'sendToken', args: () => [accounts.hex[1], 1, String(config.TOKEN_ID), accounts.hex[0]] },
+            { name: 'purchaseToken', args: () => [accounts.hex[0], String(config.TOKEN_ID), 1, accounts.hex[1]] },
+            { name: 'freezeBalance', args: () => [10_000, 3, 'ENERGY', accounts.hex[0], undefined] },
+            { name: 'unfreezeBalance', args: () => ['ENERGY', accounts.hex[0], undefined] },
+            { name: 'unfreezeBalanceV2', args: () => [10_000, 'ENERGY', accounts.hex[0]] },
+            { name: 'cancelUnfreezeBalanceV2', args: () => [accounts.hex[0]] },
+            { name: 'delegateResource', args: () => [10_000, accounts.hex[1], 'ENERGY', accounts.hex[0], false, undefined] },
+            { name: 'undelegateResource', args: () => [10_000, accounts.hex[1], 'ENERGY', accounts.hex[0]] },
+            { name: 'withdrawExpireUnfreeze', args: () => [accounts.hex[0]] },
+            { name: 'withdrawBlockRewards', args: () => [accounts.hex[0]] },
+            { name: 'applyForSR', args: () => [accounts.hex[0], 'http://sr.example.com'] },
+            { name: 'vote', args: () => [{ [accounts.b58[0]]: 1 }, accounts.hex[0]] },
+            { name: 'createAccount', args: () => [accounts.hex[1], accounts.hex[0]] },
+            { name: 'updateBrokerage', args: () => [10, accounts.hex[0]] },
+            { name: 'setAccountId', args: () => ['0x6161616161616161', accounts.hex[0]] },
+            { name: 'createProposal', args: () => [{ '0': 1_000_000 }, accounts.hex[0]] },
+            { name: 'deleteProposal', args: () => [1, accounts.hex[0]] },
+            { name: 'voteProposal', args: () => [1, true, accounts.hex[0]] },
+            { name: 'updateSetting', args: () => [config.CONTRACT_ADDRESS20_HEX, 30, accounts.hex[0]] },
+            { name: 'updateEnergyLimit', args: () => [config.CONTRACT_ADDRESS20_HEX, 5_000_000, accounts.hex[0]] },
+        ];
+
+        for (const c of cases) {
+            it(c.name, async function () {
+                const ref = await trxActions.getCurrentRefBlockParams(tronWeb.fullNode);
+                const a = c.args();
+                await assertBuilderParity(
+                    () => (tronWeb.transactionBuilder as any)[c.name](...a, { blockHeader: ref as any }),
+                    () => (tbActions as any)[c.name](tronWeb.fullNode, ...a, { blockHeader: ref as any })
+                );
+            });
+        }
+
+        it('updateAccountPermissions', async function () {
+            const ref = await trxActions.getCurrentRefBlockParams(tronWeb.fullNode);
+            const ownerPermission = {
+                type: 0,
+                permission_name: 'owner',
+                threshold: 1,
+                keys: [{ address: accounts.hex[0], weight: 1 }],
+            };
+            const activePermission = {
+                type: 2,
+                permission_name: 'active0',
+                threshold: 1,
+                operations: '7fff1fc0033e0000000000000000000000000000000000000000000000000000',
+                keys: [{ address: accounts.hex[0], weight: 1 }],
+            };
+            await assertBuilderParity(
+                () =>
+                    tronWeb.transactionBuilder.updateAccountPermissions(
+                        accounts.hex[0],
+                        ownerPermission as any,
+                        null as any,
+                        [activePermission] as any,
+                        { blockHeader: ref as any }
+                    ),
+                () =>
+                    tbActions.updateAccountPermissions(
+                        tronWeb.fullNode,
+                        accounts.hex[0],
+                        ownerPermission as any,
+                        null as any,
+                        [activePermission] as any,
+                        { blockHeader: ref as any }
+                    )
+            );
+        });
+    });
+
+    // ----------- parity for the (fullNode, configObject, issuer) builders -----------
+    // These take a config object (not a trailing options arg), so blockHeader lives INSIDE it.
+    // A fresh shallow clone is passed to each side so neither call can observe the other's mutations.
+
+    describe('class-wrapper / action parity — config-object builders', function () {
+        it('createToken', async function () {
+            const ref = await trxActions.getCurrentRefBlockParams(tronWeb.fullNode);
+            const opts = { ...config.getTokenOptions(), blockHeader: ref };
+            await assertBuilderParity(
+                () => tronWeb.transactionBuilder.createToken({ ...opts } as any, accounts.hex[0]),
+                () => tbActions.createToken(tronWeb.fullNode, { ...opts } as any, accounts.hex[0])
+            );
+        });
+
+        it('updateToken', async function () {
+            const ref = await trxActions.getCurrentRefBlockParams(tronWeb.fullNode);
+            const opts = { ...config.UPDATED_TEST_TOKEN_OPTIONS, blockHeader: ref };
+            await assertBuilderParity(
+                () => tronWeb.transactionBuilder.updateToken({ ...opts } as any, accounts.hex[0]),
+                () => tbActions.updateToken(tronWeb.fullNode, { ...opts } as any, accounts.hex[0])
+            );
+        });
+
+        it('createSmartContract', async function () {
+            const ref = await trxActions.getCurrentRefBlockParams(tronWeb.fullNode);
+            const opts = {
+                abi: Contracts.testRevert.abi,
+                bytecode: Contracts.testRevert.bytecode,
+                feeLimit: 1_000_000_000,
+                blockHeader: ref,
+            };
+            await assertBuilderParity(
+                () => tronWeb.transactionBuilder.createSmartContract({ ...opts } as any, accounts.hex[0]),
+                () => tbActions.createSmartContract(tronWeb.fullNode, { ...opts } as any, accounts.hex[0])
+            );
+        });
+    });
+
+    // ----------- parity for the transaction-transform helpers (local, deterministic) -----------
+    // Each transform mutates its input, so every call gets its own deep clone of the same base tx.
+
+    describe('class-wrapper / action parity — transforms (txLocal)', function () {
+        const clone = (tx: any) => JSON.parse(JSON.stringify(tx));
+        let base: any;
+
+        beforeEach(async function () {
+            const ref = await trxActions.getCurrentRefBlockParams(tronWeb.fullNode);
+            base = await tbActions.sendTrx(tronWeb.fullNode, accounts.hex[1], 1, accounts.hex[0], {
+                blockHeader: ref as any,
+            });
+        });
+
+        it('newTxID', async function () {
+            await assertBuilderParity(
+                () => tronWeb.transactionBuilder.newTxID(clone(base), { txLocal: true }),
+                () => tbActions.newTxID(tronWeb.fullNode, clone(base), { txLocal: true })
+            );
+        });
+
+        it('extendExpiration', async function () {
+            await assertBuilderParity(
+                () => tronWeb.transactionBuilder.extendExpiration(clone(base), 60, { txLocal: true }),
+                () => tbActions.extendExpiration(tronWeb.fullNode, clone(base), 60, { txLocal: true })
+            );
+        });
+
+        it('addUpdateData', async function () {
+            await assertBuilderParity(
+                () => tronWeb.transactionBuilder.addUpdateData(clone(base), 'parity-memo', 'utf8', { txLocal: true }),
+                () => tbActions.addUpdateData(tronWeb.fullNode, clone(base), 'parity-memo', 'utf8', { txLocal: true })
+            );
+        });
+    });
+
+    // ----------- signing parity: legacy trx.sign vs privateKeyToAccount.signTransaction -----------
+    // Unlike the builder wrappers above (a wrapper → action delegate pair), these are TWO
+    // independent signing entry points. Signing is deterministic, so for the same unsigned tx and
+    // the same key the whole signed transaction — signature bytes included — must be byte-identical.
+    // A divergence here would mean the new account signer no longer matches the legacy trx.sign.
+
+    describe('signing parity — legacy trx.sign vs privateKeyToAccount.signTransaction', function () {
+        const clone = (tx: any) => JSON.parse(JSON.stringify(tx));
+        const fixedPrivateKey = `0x${'1'.padStart(64, '0')}`;
+        const account = privateKeyToAccount(fixedPrivateKey as `0x${string}`);
+        const bareKey = fixedPrivateKey.slice(2);
+        const ownerHex = TronWeb.address.toHex(account.address);
+
+        const builders: Array<{ name: string; build: (ref: any) => Promise<any> }> = [
+            { name: 'sendTrx', build: (ref) => tbActions.sendTrx(tronWeb.fullNode, accounts.hex[1], 1, ownerHex, { blockHeader: ref }) },
+            {
+                name: 'sendToken',
+                build: (ref) =>
+                    tbActions.sendToken(tronWeb.fullNode, accounts.hex[1], 1, String(config.TOKEN_ID), ownerHex, { blockHeader: ref }),
+            },
+            {
+                name: 'freezeBalanceV2',
+                build: (ref) => tbActions.freezeBalanceV2(tronWeb.fullNode, 10_000, 'ENERGY', ownerHex, { blockHeader: ref }),
+            },
+        ];
+
+        for (const b of builders) {
+            it(`${b.name}: account signer matches legacy trx.sign byte-for-byte`, async function () {
+                const ref = await trxActions.getCurrentRefBlockParams(tronWeb.fullNode);
+                const unsigned = await b.build(ref);
+
+                // sign the SAME unsigned tx with each independent path (own clone, signing may mutate)
+                const legacySigned = await tronWeb.trx.sign(clone(unsigned), bareKey);
+                const accountSigned = await account.signTransaction(clone(unsigned));
+
+                assert.deepEqual(accountSigned.signature, legacySigned.signature);
+                assert.deepEqual(accountSigned, legacySigned);
+            });
+        }
+    });
+
+    // ----------- signing parity: message (V2) & typed data -----------
+    // account.signMessage uses the V2 scheme (utils/message.signMessage) — the SAME function behind
+    // trx.signMessageV2 (NOT trx.signMessage, which is the V1 trx.sign alias). account.signTypedData
+    // shares utils/typedData.signTypedData with trx._signTypedData. These are independent entry
+    // points, so an exact signature match proves the account signers never diverge from the legacy ones.
+
+    describe('signing parity — message (V2) & typed data', function () {
+        const fixedPrivateKey = `0x${'1'.padStart(64, '0')}`;
+        const account = privateKeyToAccount(fixedPrivateKey as `0x${string}`);
+        const bareKey = fixedPrivateKey.slice(2);
+
+        it('signMessage (string) matches trx.signMessageV2', async function () {
+            const message = 'tronweb parity check';
+            const accountSig = await account.signMessage({ message });
+            const legacySig = tronWeb.trx.signMessageV2(message, bareKey);
+            assert.equal(accountSig, legacySig);
+        });
+
+        it('signMessage (raw bytes) matches trx.signMessageV2', async function () {
+            const rawBytes = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+            const accountSig = await account.signMessage({ message: { raw: rawBytes } });
+            const legacySig = tronWeb.trx.signMessageV2(rawBytes, bareKey);
+            assert.equal(accountSig, legacySig);
+        });
+
+        it('signTypedData matches trx._signTypedData', async function () {
+            const domain = {
+                name: 'Parity',
+                version: '1',
+                chainId: 1,
+                verifyingContract: '0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC',
+            };
+            const types = { Mail: [{ name: 'contents', type: 'string' }] };
+            const message = { contents: 'hello' };
+
+            const accountSig = await account.signTypedData({ domain, types, primaryType: 'Mail', message });
+            const legacySig = tronWeb.trx._signTypedData(domain as any, types as any, message, bareKey);
+            assert.equal(accountSig, legacySig);
         });
     });
 });
