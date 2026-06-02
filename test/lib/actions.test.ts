@@ -8,7 +8,10 @@ import * as tbActions from '../../src/lib/actions/transactionBuilder.js';
 import * as trxActions from '../../src/lib/actions/trx.js';
 import * as eventActions from '../../src/lib/actions/event.js';
 import { privateKeyToAccount } from '../../src/accounts/privateKeyToAccount.js';
+import { createPublicClient } from '../../src/clients/createPublicClient.js';
+import { createWalletClient } from '../../src/clients/createWalletClient.js';
 import { HttpProvider } from '../../src/lib/providers/index.js';
+import wait from '../helpers/wait.js';
 import config from '../helpers/config.js';
 import { Address } from '../../src/types/Trx.js';
 import Contracts from '../fixtures/contracts';
@@ -530,6 +533,91 @@ describe('action layer', function () {
             const accountSig = await account.signTypedData({ domain, types, primaryType: 'Mail', message });
             const legacySig = tronWeb.trx._signTypedData(domain as any, types as any, message, bareKey);
             assert.equal(accountSig, legacySig);
+        });
+    });
+
+    // ----------- contract parity: new client interfaces vs legacy tronWeb.contract -----------
+    // The same function + args must produce (a) the same decoded read result and (b) the same
+    // on-chain calldata. (a) goes through both read interfaces; (b) broadcasts a write through both
+    // interfaces and compares the recorded calldata, so the full wrapper (not just the shared
+    // encoder) is exercised.
+
+    describe('contract parity — new client vs legacy tronWeb.contract', function () {
+        let account: ReturnType<typeof privateKeyToAccount>;
+        let owner: { pk: string; hex: string };
+        let legacyTron: TronWeb;
+        let publicClient: ReturnType<typeof createPublicClient>;
+        let walletClient: ReturnType<typeof createWalletClient>;
+        let constantAddress: string;
+        let setValAddress: string;
+
+        async function deploy(fixture: { abi: any; bytecode: string }): Promise<string> {
+            const tx = await tbActions.createSmartContract(
+                tronWeb.fullNode,
+                { abi: fixture.abi, bytecode: fixture.bytecode, feeLimit: 1_000_000_000 },
+                owner.hex
+            );
+            const signed = await account.signTransaction(tx);
+            await trxActions.sendRawTransaction(tronWeb.fullNode, signed);
+            for (let i = 0; i < 20; i++) {
+                const info = await tronWeb.trx.getTransactionInfo(tx.txID);
+                if (Object.keys(info).length) break;
+                await wait(3);
+            }
+            return tx.contract_address;
+        }
+
+        async function fetchCallData(txID: string): Promise<string> {
+            for (let i = 0; i < 20; i++) {
+                const tx: any = await tronWeb.trx.getTransaction(txID).catch(() => ({}));
+                if (tx && tx.txID) return tx.raw_data.contract[0].parameter.value.data;
+                await wait(3);
+            }
+            throw new Error(`transaction not found on chain: ${txID}`);
+        }
+
+        before(async function () {
+            this.timeout(120000);
+            const idx = accounts.pks.findIndex((p) => /^(0x)?[0-9a-fA-F]{64}$/.test(p));
+            const pk = accounts.pks[idx].replace(/^0x/, '');
+            owner = { pk, hex: accounts.hex[idx] };
+            account = privateKeyToAccount(`0x${pk}` as `0x${string}`);
+            legacyTron = tronWebBuilder.createInstance({ privateKey: pk });
+            publicClient = createPublicClient({ fullHost: FULL_NODE_API });
+            walletClient = createWalletClient({ account, fullHost: FULL_NODE_API });
+            constantAddress = await deploy(Contracts.testConstant);
+            setValAddress = await deploy(Contracts.testSetVal);
+        });
+
+        it('readContract decodes identically to legacy tronWeb.contract().call()', async function () {
+            this.timeout(30000);
+            const legacy = await legacyTron.contract(Contracts.testConstant.abi).at(constantAddress);
+            const legacyResult = await legacy.testPure(1, 2).call();
+            const clientResult = await publicClient.readContract({
+                address: constantAddress,
+                abi: Contracts.testConstant.abi,
+                functionName: 'testPure',
+                args: [1, 2],
+            } as any);
+            assert.deepEqual(clientResult, legacyResult);
+        });
+
+        it('writeContract calldata matches legacy tronWeb.contract().send()', async function () {
+            this.timeout(60000);
+            const legacy = await legacyTron.contract(Contracts.testSetVal.abi).at(setValAddress);
+
+            const clientTxId = await walletClient.writeContract({
+                address: setValAddress,
+                abi: Contracts.testSetVal.abi,
+                functionName: 'set',
+                args: [7],
+                feeLimit: 1_000_000_000,
+            } as any);
+            const legacyTxId = await legacy.set(7).send({ feeLimit: 1_000_000_000 });
+
+            const clientData = await fetchCallData(clientTxId);
+            const legacyData = await fetchCallData(legacyTxId);
+            assert.equal(clientData, legacyData);
         });
     });
 });

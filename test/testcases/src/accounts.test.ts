@@ -1,6 +1,7 @@
 import { assert } from 'chai';
 
 import { privateKeyToAccount } from '../../../src/accounts/privateKeyToAccount.js';
+import { TronWeb } from '../../../src/tronweb.js';
 import { toHex } from '../../../src/utils/address.js';
 import { hexStr2byteArray } from '../../../src/utils/code.js';
 import { ADDRESS_PREFIX } from '../../../src/utils/constants.js';
@@ -229,6 +230,18 @@ describe('privateKeyToAccount', function () {
         transaction.raw_data_hex += '00';
 
         await assertRejectsWithMessage(() => account.signTransaction(transaction), 'Invalid transaction');
+    });
+
+    it('derives the same base58 address as legacy TronWeb.address.fromPrivateKey', function () {
+        const keys = [
+            '1'.padStart(64, '0'),
+            '2'.padStart(64, '0'),
+            'da146374a75310b9666e834ee4ad0866d6f4035967bfc76217c5a495fff9f0d0',
+        ];
+        for (const bareKey of keys) {
+            const derived = privateKeyToAccount(`0x${bareKey}` as `0x${string}`);
+            assert.equal(derived.address, TronWeb.address.fromPrivateKey(bareKey));
+        }
     });
 
 });

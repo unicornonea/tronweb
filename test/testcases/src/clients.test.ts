@@ -7,6 +7,7 @@ import { txJsonToPb, txPbToTxID, txPbToRawDataHex } from '../../../src/utils/tra
 import { createPublicClient } from '../../../src/clients/createPublicClient.js';
 import { createWalletClient } from '../../../src/clients/createWalletClient.js';
 import { getContract } from '../../../src/clients/getContract.js';
+import { Trx } from '../../../src/lib/trx.js';
 import { HttpProvider } from '../../../src/lib/providers/index.js';
 import { mainnet, nile, shasta } from '../../../src/chains/index.js';
 import {
@@ -828,5 +829,68 @@ describe('client factories', function () {
             }),
             { data: [] }
         );
+    });
+
+    // Verify is the other half of signing parity: the new public client and the legacy Trx must
+    // agree on whether a signature matches an address. Both recover through the same utils, so an
+    // agreement here proves the client wrapper does not diverge from the legacy verifier.
+    describe('verify parity — public client vs legacy Trx', function () {
+        const publicClient = createPublicClient({ fullHost });
+        const wrongAddress = privateKeyToAccount(`0x${'2'.padStart(64, '0')}` as `0x${string}`).address;
+
+        it('verifyMessage agrees with Trx.verifyMessageV2', async function () {
+            const message = 'verify parity check';
+            const signature = await account.signMessage({ message });
+
+            assert.isTrue(await publicClient.verifyMessage({ address: account.address, message, signature }));
+            assert.equal(Trx.verifyMessageV2(message, signature), account.address);
+
+            assert.isFalse(await publicClient.verifyMessage({ address: wrongAddress, message, signature }));
+            assert.notEqual(Trx.verifyMessageV2(message, signature), wrongAddress);
+        });
+
+        it('verifyTypedData agrees with Trx.verifyTypedData', async function () {
+            const signature = await account.signTypedData(testTypedData as any);
+
+            assert.isTrue(
+                await publicClient.verifyTypedData({
+                    address: account.address,
+                    domain: testTypedData.domain,
+                    types: testTypedData.types,
+                    primaryType: testTypedData.primaryType,
+                    message: testTypedData.message,
+                    signature,
+                })
+            );
+            assert.isTrue(
+                Trx.verifyTypedData(
+                    testTypedData.domain as any,
+                    testTypedData.types as any,
+                    testTypedData.message,
+                    signature,
+                    account.address
+                )
+            );
+
+            assert.isFalse(
+                await publicClient.verifyTypedData({
+                    address: wrongAddress,
+                    domain: testTypedData.domain,
+                    types: testTypedData.types,
+                    primaryType: testTypedData.primaryType,
+                    message: testTypedData.message,
+                    signature,
+                })
+            );
+            assert.isFalse(
+                Trx.verifyTypedData(
+                    testTypedData.domain as any,
+                    testTypedData.types as any,
+                    testTypedData.message,
+                    signature,
+                    wrongAddress
+                )
+            );
+        });
     });
 });
