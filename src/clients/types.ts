@@ -1,5 +1,6 @@
-import type { TransactionBuilder } from '../lib/TransactionBuilder/TransactionBuilder.js';
-import type { Trx } from '../lib/trx.js';
+import type * as tbActions from '../lib/actions/transactionBuilder.js';
+import type { Account, BroadcastReturn, TransactionInfo } from '../types/Trx.js';
+import type { Block, GetTransactionResponse } from '../types/APIResponse.js';
 import type { Hex, SignTypedDataParameters, SignableMessage, WalletAccount } from '../accounts/types.js';
 import type { Chain } from '../chains/index.js';
 import type { Transport } from '../transports/index.js';
@@ -7,47 +8,7 @@ import type { ContractAbiInterface, EventFragment, FunctionFragment, GetOutputsT
 import type { EventResponse, GetEventResultOptions } from '../types/Event.js';
 import type { SignedTransaction, Transaction } from '../types/Transaction.js';
 import type { TronWebOptions } from '../types/TronWeb.js';
-import type { BroadcastReturn, TransactionInfo } from '../types/Trx.js';
 import type { ClientType } from './createClientMetadata.js';
-
-export const PUBLIC_CLIENT_BLOCKED_TRX_METHODS = [
-    '_signTypedData',
-    'broadcast',
-    'broadcastHex',
-    'freezeBalance',
-    'multiSign',
-    'send',
-    'sendAsset',
-    'sendHexTransaction',
-    'sendRawTransaction',
-    'sendToken',
-    'sendTransaction',
-    'sendTrx',
-    'sign',
-    'signMessage',
-    'signMessageV2',
-    'signTransaction',
-    'signTypedData',
-    'unfreezeBalance',
-    'updateAccount',
-] as const;
-
-export type PublicClientBlockedTrxMethod = (typeof PUBLIC_CLIENT_BLOCKED_TRX_METHODS)[number];
-
-export type PublicClientTrx = Omit<Trx, PublicClientBlockedTrxMethod>;
-
-export type PublicClientQueryTrx = Pick<
-    Trx,
-    | 'getAccount'
-    | 'getBalance'
-    | 'getBlock'
-    | 'getBlockByHash'
-    | 'getBlockByNumber'
-    | 'getBlockTransactionCount'
-    | 'getCurrentBlock'
-    | 'getTransaction'
-    | 'getTransactionInfo'
->;
 
 export interface GetAccountParameters {
     readonly address: string;
@@ -324,31 +285,19 @@ export interface PublicClientActions {
     >(
         input: GetContractEventsParameters<Abi, EventName>
     ) => Promise<GetContractEventsReturnType>;
-    readonly getAccount: (
-        input?: Parameters<PublicClientQueryTrx['getAccount']>[0] | GetAccountParameters
-    ) => ReturnType<PublicClientQueryTrx['getAccount']>;
-    readonly getBalance: (
-        input?: Parameters<PublicClientQueryTrx['getBalance']>[0] | GetBalanceParameters
-    ) => ReturnType<PublicClientQueryTrx['getBalance']>;
+    readonly getAccount: (input?: string | false | GetAccountParameters) => Promise<Account>;
+    readonly getBalance: (input?: string | false | GetBalanceParameters) => Promise<number>;
     readonly getBlock: (
-        input?: Parameters<PublicClientQueryTrx['getBlock']>[0] | GetBlockParameters
-    ) => ReturnType<PublicClientQueryTrx['getBlock']>;
-    readonly getBlockByHash: (
-        input: Parameters<PublicClientQueryTrx['getBlockByHash']>[0] | GetBlockByHashParameters
-    ) => ReturnType<PublicClientQueryTrx['getBlockByHash']>;
-    readonly getBlockByNumber: (
-        input: Parameters<PublicClientQueryTrx['getBlockByNumber']>[0] | GetBlockByNumberParameters
-    ) => ReturnType<PublicClientQueryTrx['getBlockByNumber']>;
-    readonly getBlockTransactionCount: (input?: GetBlockTransactionCountParameters) => ReturnType<PublicClientQueryTrx['getBlockTransactionCount']>;
+        input?: 'earliest' | 'latest' | number | string | false | GetBlockParameters
+    ) => Promise<Block>;
+    readonly getBlockByHash: (input: string | GetBlockByHashParameters) => Promise<Block>;
+    readonly getBlockByNumber: (input: number | GetBlockByNumberParameters) => Promise<Block>;
+    readonly getBlockTransactionCount: (input?: GetBlockTransactionCountParameters) => Promise<number>;
     readonly getChainId: () => Promise<number>;
     readonly getLogs: (input: GetLogsParameters) => Promise<GetLogsReturnType>;
     readonly getBlockNumber: () => Promise<number>;
-    readonly getTransaction: (
-        input: Parameters<PublicClientQueryTrx['getTransaction']>[0] | GetTransactionParameters
-    ) => ReturnType<PublicClientQueryTrx['getTransaction']>;
-    readonly getTransactionInfo: (
-        input: Parameters<PublicClientQueryTrx['getTransactionInfo']>[0] | GetTransactionParameters
-    ) => ReturnType<PublicClientQueryTrx['getTransactionInfo']>;
+    readonly getTransaction: (input: string | GetTransactionParameters) => Promise<GetTransactionResponse>;
+    readonly getTransactionInfo: (input: string | GetTransactionParameters) => Promise<TransactionInfo>;
     readonly getTransactionReceipt: (input: GetTransactionReceiptParameters) => Promise<TransactionInfo>;
     readonly waitForTransactionReceipt: (input: WaitForTransactionReceiptParameters) => Promise<TransactionInfo>;
     readonly readContract: <
@@ -374,31 +323,83 @@ export interface WalletClientConfig<TAccount extends WalletAccount = WalletAccou
     account: TAccount;
 }
 
-/** A read-only client that proxies TronWeb's trx and transactionBuilder */
+/** A read-only client. */
 export interface PublicClient extends ClientMetadata, PublicClientActions {
     /** Selected chain metadata, if configured */
     readonly chain?: Chain;
     /** Selected transport, if configured */
     readonly transport?: Transport;
-    /** Filtered access to tronWeb.trx (write methods removed) */
-    readonly trx: PublicClientTrx;
-    /** Direct access to tronWeb.transactionBuilder (unsigned tx building) */
-    readonly transactionBuilder: TransactionBuilder;
 }
 
 /**
- * Parameters for WalletClient.sendTransaction.
- * K must be a method name of TransactionBuilder that returns a Promise.
+ * Names of transaction-builder actions dispatchable via WalletClient.sendTransaction.
+ *
+ * Each entry corresponds to an exported function in `lib/actions/transactionBuilder`
+ * that produces a signable transaction.
  */
-export type SendTransactionParams<K extends keyof TransactionBuilder> = {
+export type SendTransactionType =
+    | 'sendTrx'
+    | 'sendToken'
+    | 'purchaseToken'
+    | 'freezeBalance'
+    | 'unfreezeBalance'
+    | 'freezeBalanceV2'
+    | 'unfreezeBalanceV2'
+    | 'cancelUnfreezeBalanceV2'
+    | 'delegateResource'
+    | 'undelegateResource'
+    | 'withdrawExpireUnfreeze'
+    | 'withdrawBlockRewards'
+    | 'applyForSR'
+    | 'vote'
+    | 'updateBrokerage'
+    | 'createSmartContract'
+    | 'triggerSmartContract'
+    | 'triggerConstantContract'
+    | 'triggerConfirmedConstantContract'
+    | 'estimateEnergy'
+    | 'deployConstantContract'
+    | 'clearABI'
+    | 'createToken'
+    | 'updateToken'
+    | 'createAccount'
+    | 'updateAccount'
+    | 'setAccountId'
+    | 'createProposal'
+    | 'deleteProposal'
+    | 'voteProposal'
+    | 'createTRXExchange'
+    | 'createTokenExchange'
+    | 'injectExchangeTokens'
+    | 'withdrawExchangeTokens'
+    | 'tradeExchangeTokens'
+    | 'updateSetting'
+    | 'updateEnergyLimit'
+    | 'updateAccountPermissions'
+    | 'newTxID'
+    | 'alterTransaction'
+    | 'extendExpiration'
+    | 'addUpdateData';
+
+/**
+ * Parameters for WalletClient.sendTransaction.
+ * `type` selects an action; `parameters` are the action's positional args
+ * AFTER the implicit provider prefix (fullNode, and where applicable solidityNode / cache)
+ * that the wallet client injects automatically.
+ */
+export type SendTransactionParams<K extends SendTransactionType = SendTransactionType> = {
     type: K;
-    parameters: TransactionBuilder[K] extends (...args: infer P) => Promise<any> ? P : never;
+    parameters: (typeof tbActions)[K] extends (first: any, ...rest: infer R) => Promise<any>
+        ? K extends 'triggerSmartContract' | 'triggerConstantContract' | 'triggerConfirmedConstantContract' | 'estimateEnergy' | 'deployConstantContract'
+            ? R extends [any, ...infer Rest] ? Rest : never
+            : K extends 'clearABI'
+              ? R extends [any, ...infer Rest] ? Rest : never
+              : R
+        : never;
 };
 
-/** A write-capable client that extends PublicClient with signing + broadcasting */
+/** A write-capable client. */
 export interface WalletClient<TAccount extends WalletAccount = WalletAccount> extends PublicClient {
-    /** Full access to tronWeb.trx, including write helpers */
-    readonly trx: Trx;
     /** The Account used for signing */
     readonly account: TAccount;
     readonly getAddresses: () => Promise<GetAddressesReturnType>;
@@ -434,7 +435,7 @@ export interface WalletClient<TAccount extends WalletAccount = WalletAccount> ex
      * });
      * ```
      */
-    sendTransaction<K extends keyof TransactionBuilder>(
+    sendTransaction<K extends SendTransactionType>(
         params: SendTransactionParams<K>
     ): Promise<BroadcastReturn<SignedTransaction>>;
 }

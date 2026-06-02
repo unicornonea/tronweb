@@ -1,8 +1,10 @@
 import { TronWeb } from '../tronweb.js';
+import type { HttpProvider } from '../lib/providers/index.js';
 import type {
     DeployContractParameters,
     SendRawTransactionParameters,
     SendTransactionParams,
+    SendTransactionType,
     SignTransactionParameters,
     WalletClient,
     WalletClientConfig,
@@ -10,13 +12,69 @@ import type {
 } from './types.js';
 import type { WalletAccount } from '../accounts/types.js';
 import type { ContractAbiInterface, FunctionFragment } from '../types/ABI.js';
-import type { TransactionBuilder } from '../lib/TransactionBuilder/TransactionBuilder.js';
 import type { SignedTransaction, Transaction } from '../types/Transaction.js';
 import type { BroadcastReturn } from '../types/Trx.js';
 import { toHex } from '../utils/address.js';
 import { createClientQueryActions } from './createClientQueryActions.js';
 import { createClientMetadata } from './createClientMetadata.js';
-import { disableClientTronWebMutators, resolveClientConfig } from './resolveClientConfig.js';
+import { resolveClientProviders } from './resolveClientConfig.js';
+import * as tbActions from '../lib/actions/transactionBuilder.js';
+import * as trxActions from '../lib/actions/trx.js';
+
+const SEND_TRANSACTION_NEEDS_SOLIDITY: ReadonlySet<SendTransactionType> = new Set([
+    'triggerSmartContract',
+    'triggerConstantContract',
+    'triggerConfirmedConstantContract',
+    'estimateEnergy',
+    'deployConstantContract',
+]);
+
+const SEND_TRANSACTION_NEEDS_CACHE: ReadonlySet<SendTransactionType> = new Set(['clearABI']);
+
+const SEND_TRANSACTION_ALLOWED: ReadonlySet<SendTransactionType> = new Set([
+    'sendTrx',
+    'sendToken',
+    'purchaseToken',
+    'freezeBalance',
+    'unfreezeBalance',
+    'freezeBalanceV2',
+    'unfreezeBalanceV2',
+    'cancelUnfreezeBalanceV2',
+    'delegateResource',
+    'undelegateResource',
+    'withdrawExpireUnfreeze',
+    'withdrawBlockRewards',
+    'applyForSR',
+    'vote',
+    'updateBrokerage',
+    'createSmartContract',
+    'triggerSmartContract',
+    'triggerConstantContract',
+    'triggerConfirmedConstantContract',
+    'estimateEnergy',
+    'deployConstantContract',
+    'clearABI',
+    'createToken',
+    'updateToken',
+    'createAccount',
+    'updateAccount',
+    'setAccountId',
+    'createProposal',
+    'deleteProposal',
+    'voteProposal',
+    'createTRXExchange',
+    'createTokenExchange',
+    'injectExchangeTokens',
+    'withdrawExchangeTokens',
+    'tradeExchangeTokens',
+    'updateSetting',
+    'updateEnergyLimit',
+    'updateAccountPermissions',
+    'newTxID',
+    'alterTransaction',
+    'extendExpiration',
+    'addUpdateData',
+]);
 
 function isReadOnlyFunctionFragment(fragment: FunctionFragment): boolean {
     const stateMutability = (fragment.stateMutability ?? '').toLowerCase();
@@ -60,9 +118,9 @@ function resolveSignerAddress(account: WalletAccount, accountOverride: string | 
     return accountOverride;
 }
 
-function getBroadcastErrorMessage(tronWeb: TronWeb, broadcast: Record<string, unknown>): string {
+function getBroadcastErrorMessage(broadcast: Record<string, unknown>): string {
     if (typeof broadcast.message === 'string' && broadcast.message.length > 0) {
-        return tronWeb.toUtf8(broadcast.message);
+        return TronWeb.toUtf8(broadcast.message);
     }
 
     if (typeof broadcast.code === 'string' && broadcast.code.length > 0) {
@@ -72,14 +130,14 @@ function getBroadcastErrorMessage(tronWeb: TronWeb, broadcast: Record<string, un
     return 'Failed to broadcast transaction';
 }
 
-function assertBroadcastOk(tronWeb: TronWeb, broadcast: unknown): void {
+function assertBroadcastOk(broadcast: unknown): void {
     if (broadcast && typeof broadcast === 'object' && (broadcast as { code?: unknown }).code) {
-        throw new Error(getBroadcastErrorMessage(tronWeb, broadcast as Record<string, unknown>));
+        throw new Error(getBroadcastErrorMessage(broadcast as Record<string, unknown>));
     }
 }
 
 /**
- * Create a write-capable TronWeb client.
+ * Create a write-capable client.
  *
  * The client uses the provided Account for all signing operations. The Account's
  * private key is never exposed — signing is delegated to `account.signTransaction()`.
@@ -102,42 +160,40 @@ function assertBroadcastOk(tronWeb: TronWeb, broadcast: unknown): void {
  */
 export function createWalletClient<TAccount extends WalletAccount>(config: WalletClientConfig<TAccount>): WalletClient<TAccount> {
     const { account, key, name, ...clientConfig } = config;
-    const { chain, transport, tronWebConfig } = resolveClientConfig(clientConfig);
-    // Initialise TronWeb with the account's address so the default address is set,
-    // but we never pass the raw private key — signing always goes through account.signTransaction().
-    const tronWeb = new TronWeb({ ...tronWebConfig });
-    tronWeb.setAddress(account.address);
-    disableClientTronWebMutators(tronWeb);
+    const { chain, transport, fullNode, solidityNode, eventServer, feeLimit } = resolveClientProviders(clientConfig);
 
-    const sendTransaction = async <K extends keyof TransactionBuilder>(
+    // Per-client ABI cache (replaces the old `tronWeb.trx.cache`). Reset on each
+    // client construction so cached contracts never bleed across instances.
+    const contractCache = { contracts: {} as Record<string, unknown> };
+
+    const dispatchSendTransaction = (type: SendTransactionType, parameters: readonly unknown[]) => {
+        if (!SEND_TRANSACTION_ALLOWED.has(type)) {
+            throw new Error(`Unknown sendTransaction type: "${String(type)}"`);
+        }
+        const fn = (tbActions as Record<string, unknown>)[type] as (...args: unknown[]) => Promise<unknown>;
+        const prefix: unknown[] = [fullNode];
+        if (SEND_TRANSACTION_NEEDS_SOLIDITY.has(type)) prefix.push(solidityNode);
+        if (SEND_TRANSACTION_NEEDS_CACHE.has(type)) prefix.push(contractCache);
+        return fn(...prefix, ...parameters);
+    };
+
+    const sendTransaction = async <K extends SendTransactionType>(
         params: SendTransactionParams<K>
     ): Promise<BroadcastReturn<SignedTransaction>> => {
         const { type, parameters } = params;
-        const method = tronWeb.transactionBuilder[type as keyof TransactionBuilder];
-        if (typeof method !== 'function') {
-            throw new Error(`Unknown transactionBuilder method: "${String(type)}"`);
-        }
+        const result = (await dispatchSendTransaction(type, parameters as readonly unknown[])) as any;
 
-        // Build the unsigned transaction
-        const result: any = await (method as (...args: any[]) => Promise<any>).apply(
-            tronWeb.transactionBuilder,
-            parameters as any[]
-        );
-
-        // Some methods return a TransactionWrapper ({ result, transaction }),
-        // others return the Transaction object directly.
+        // triggerSmartContract returns { result, transaction }; pure builders return Transaction directly.
         const transaction = result?.transaction ?? result;
 
         if (!transaction || !transaction.txID) {
-            throw new Error('transactionBuilder did not return a valid transaction object');
+            throw new Error('action did not return a valid transaction object');
         }
 
-        // Sign with the account (private key stays encapsulated)
         const signed = await account.signTransaction(transaction);
 
-        // Broadcast — surface broadcast errors consistently with writeContract / deployContract
-        const broadcast = await tronWeb.trx.sendRawTransaction(signed);
-        assertBroadcastOk(tronWeb, broadcast);
+        const broadcast = await trxActions.sendRawTransaction(fullNode, signed);
+        assertBroadcastOk(broadcast);
         return broadcast;
     };
 
@@ -147,7 +203,7 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
 
     const sendRawTransaction = async <TTransaction extends SignedTransaction = SignedTransaction>({
         transaction,
-    }: SendRawTransactionParameters<TTransaction>) => tronWeb.trx.sendRawTransaction(transaction);
+    }: SendRawTransactionParameters<TTransaction>) => trxActions.sendRawTransaction(fullNode, transaction);
 
     const signMessage = async (input: Parameters<TAccount['signMessage']>[0]) => account.signMessage(input);
 
@@ -167,7 +223,7 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
         args,
         account: accountOverride,
         value,
-        feeLimit,
+        feeLimit: callFeeLimit,
         tokenId,
         tokenValue,
         permissionId,
@@ -175,12 +231,14 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
         const signerAddress = resolveSignerAddress(account, accountOverride);
         const fragment = getWriteContractFragment(abi, functionName);
         const callValue = resolveCallValue(value);
-        const txWrapper = await tronWeb.transactionBuilder.triggerSmartContract(
+        const txWrapper = await tbActions.triggerSmartContract(
+            fullNode,
+            solidityNode,
             address,
             buildFunctionSelector(fragment),
             {
+                feeLimit: callFeeLimit ?? feeLimit,
                 ...(callValue !== undefined ? { callValue } : {}),
-                ...(feeLimit !== undefined ? { feeLimit } : {}),
                 ...(tokenId !== undefined ? { tokenId } : {}),
                 ...(tokenValue !== undefined ? { tokenValue } : {}),
                 ...(permissionId !== undefined ? { permissionId } : {}),
@@ -196,12 +254,12 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
         }
 
         if (!txWrapper.transaction || !txWrapper.transaction.txID) {
-            throw new Error('transactionBuilder did not return a valid transaction object');
+            throw new Error('triggerSmartContract did not return a valid transaction object');
         }
 
         const signed = await account.signTransaction(txWrapper.transaction);
-        const broadcast = await tronWeb.trx.sendRawTransaction(signed);
-        assertBroadcastOk(tronWeb, broadcast);
+        const broadcast = await trxActions.sendRawTransaction(fullNode, signed);
+        assertBroadcastOk(broadcast);
 
         return signed.txID;
     };
@@ -211,9 +269,9 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
         bytecode,
         args,
         account: accountOverride,
-        name,
+        name: contractName,
         value,
-        feeLimit,
+        feeLimit: deployFeeLimit,
         tokenId,
         tokenValue,
         userFeePercentage,
@@ -224,14 +282,15 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
     }: DeployContractParameters<Abi>) => {
         const signerAddress = resolveSignerAddress(account, accountOverride);
         const callValue = resolveCallValue(value);
-        const transaction = await tronWeb.transactionBuilder.createSmartContract(
+        const transaction = await tbActions.createSmartContract(
+            fullNode,
             {
                 abi,
                 bytecode,
+                feeLimit: deployFeeLimit ?? feeLimit,
                 ...(args !== undefined ? { parameters: [...args] } : {}),
-                ...(name !== undefined ? { name } : {}),
+                ...(contractName !== undefined ? { name: contractName } : {}),
                 ...(callValue !== undefined ? { callValue } : {}),
-                ...(feeLimit !== undefined ? { feeLimit } : {}),
                 ...(tokenId !== undefined ? { tokenId } : {}),
                 ...(tokenValue !== undefined ? { tokenValue } : {}),
                 ...(userFeePercentage !== undefined ? { userFeePercentage } : {}),
@@ -244,12 +303,12 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
         );
 
         if (!transaction || !transaction.txID) {
-            throw new Error('transactionBuilder did not return a valid transaction object');
+            throw new Error('createSmartContract did not return a valid transaction object');
         }
 
         const signed = await account.signTransaction(transaction);
-        const broadcast = await tronWeb.trx.sendRawTransaction(signed);
-        assertBroadcastOk(tronWeb, broadcast);
+        const broadcast = await trxActions.sendRawTransaction(fullNode, signed);
+        assertBroadcastOk(broadcast);
 
         return signed.txID;
     };
@@ -261,7 +320,14 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
         defaultName: 'Wallet Client',
         type: 'walletClient',
     });
-    const queryActions = createClientQueryActions({ chain, tronWeb, trx: tronWeb.trx });
+    const queryActions = createClientQueryActions({
+        chain,
+        fullNode,
+        solidityNode,
+        eventServer,
+        feeLimit,
+        defaultAddress: account.address,
+    });
 
     const client: WalletClient<TAccount> = {
         ...metadata,
@@ -271,12 +337,6 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
         },
         get transport() {
             return transport;
-        },
-        get trx() {
-            return tronWeb.trx;
-        },
-        get transactionBuilder() {
-            return tronWeb.transactionBuilder;
         },
         get account() {
             return account;
@@ -294,3 +354,6 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
 
     return client;
 }
+
+// Re-export HttpProvider so downstream code can import it from here as before.
+export type { HttpProvider };

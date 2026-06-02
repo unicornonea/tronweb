@@ -4,53 +4,8 @@ import type { TronWebOptions } from '../types/TronWeb.js';
 import type { Chain } from '../chains/index.js';
 import { http } from '../transports/http.js';
 import type { HttpTransport, Transport } from '../transports/types.js';
-import type { TronWeb } from '../tronweb.js';
 
-const CLIENT_DISABLED_TRONWEB_MUTATORS = [
-    'setPrivateKey',
-    'setAddress',
-    'setFullNode',
-    'setSolidityNode',
-    'setEventServer',
-    'setDefaultBlock',
-] as const;
-
-export function disableClientTronWebMutators(tronWeb: TronWeb): TronWeb {
-    for (const name of CLIENT_DISABLED_TRONWEB_MUTATORS) {
-        Object.defineProperty(tronWeb, name, {
-            value: () => {
-                throw new Error(
-                    `${name} is disabled on a client-managed TronWeb instance. ` +
-                        'Client configuration is immutable after creation; build a new client with the desired settings instead.'
-                );
-            },
-            writable: false,
-            configurable: false,
-        });
-    }
-    // Defence in depth: even if a privateKey leaked into the constructor before
-    // setPrivateKey was locked, scrub defaultPrivateKey and freeze the slot so
-    // trx.sign(...) (which defaults to this.tronWeb.defaultPrivateKey) cannot
-    // backdoor-sign.
-    Object.defineProperty(tronWeb, 'defaultPrivateKey', {
-        value: '',
-        writable: false,
-        configurable: false,
-    });
-    // Lock the provider fields too. The locked setters above prevent
-    // setFullNode / setSolidityNode / setEventServer from being called, but the
-    // backing fields are plain writable properties and `event.setServer(...)`
-    // mutates `this.tronWeb.eventServer` directly — freezing the slots closes
-    // that path as well.
-    for (const field of ['fullNode', 'solidityNode', 'eventServer'] as const) {
-        Object.defineProperty(tronWeb, field, {
-            value: tronWeb[field],
-            writable: false,
-            configurable: false,
-        });
-    }
-    return tronWeb;
-}
+const DEFAULT_FEE_LIMIT = 150_000_000;
 
 type ResolvedHttpTransport = HttpTransport & { url: string };
 
@@ -65,6 +20,15 @@ export interface ResolvedClientConfig {
     chain?: Chain;
     transport?: Transport;
     tronWebConfig: Omit<TronWebOptions, 'privateKey'>;
+}
+
+export interface ResolvedClientProviders {
+    chain?: Chain;
+    transport?: Transport;
+    fullNode: HttpProvider;
+    solidityNode: HttpProvider;
+    eventServer?: HttpProvider;
+    feeLimit: number;
 }
 
 function hasExplicitNodeConfig(config: Omit<TronWebOptions, 'privateKey'>) {
@@ -92,8 +56,6 @@ function resolveHttpTransport(chain?: Chain, transport?: Transport): ResolvedHtt
 
 export function resolveClientConfig(config: ClientConfigWithTransport): ResolvedClientConfig {
     // Strip the client-only fields plus any `privateKey` smuggled in via `as any`.
-    // The Omit on ClientConfigWithTransport is type-only — runtime guard is required
-    // so a stray privateKey never reaches the underlying TronWeb constructor.
     const {
         chain,
         transport,
@@ -104,20 +66,12 @@ export function resolveClientConfig(config: ClientConfigWithTransport): Resolved
     } = config as ClientConfigWithTransport & { privateKey?: unknown };
 
     if (hasExplicitNodeConfig(tronWebConfig)) {
-        return {
-            chain,
-            transport,
-            tronWebConfig,
-        };
+        return { chain, transport, tronWebConfig };
     }
 
     const resolvedTransport = resolveHttpTransport(chain, transport);
     if (!resolvedTransport) {
-        return {
-            chain,
-            transport,
-            tronWebConfig,
-        };
+        return { chain, transport, tronWebConfig };
     }
 
     const { headers = {}, timeout = 30000, url } = resolvedTransport;
@@ -133,5 +87,40 @@ export function resolveClientConfig(config: ClientConfigWithTransport): Resolved
             solidityNode: new HttpProvider(url, timeout, '', '', headers),
             eventServer: new HttpProvider(url, timeout, '', '', eventHeaders),
         },
+    };
+}
+
+function toHttpProvider(value: HttpProvider | string | undefined, fallback?: string): HttpProvider | undefined {
+    if (value === undefined) {
+        return fallback ? new HttpProvider(fallback) : undefined;
+    }
+    return typeof value === 'string' ? new HttpProvider(value) : value;
+}
+
+/**
+ * Resolve a client config into ready-to-use HTTP providers.
+ *
+ * Coerces string node URLs into HttpProvider instances and fills any
+ * missing endpoint from `fullHost` when present. Throws if no node can
+ * be derived from the input.
+ */
+export function resolveClientProviders(config: ClientConfigWithTransport): ResolvedClientProviders {
+    const { chain, transport, tronWebConfig } = resolveClientConfig(config);
+    const fullHost = (tronWebConfig as { fullHost?: string }).fullHost;
+    const fullNode = toHttpProvider(tronWebConfig.fullNode, fullHost);
+    const solidityNode = toHttpProvider(tronWebConfig.solidityNode, fullHost);
+    const eventServer = toHttpProvider(tronWebConfig.eventServer, fullHost);
+
+    if (!fullNode) {
+        throw new Error('Client requires fullNode (or fullHost) to be configured.');
+    }
+
+    return {
+        chain,
+        transport,
+        fullNode,
+        solidityNode: solidityNode ?? fullNode,
+        eventServer,
+        feeLimit: DEFAULT_FEE_LIMIT,
     };
 }

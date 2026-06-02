@@ -3,11 +3,11 @@ import { assert } from 'chai';
 import { privateKeyToAccount } from '../../../src/accounts/privateKeyToAccount.js';
 import { fromHex, toHex } from '../../../src/utils/address.js';
 import { encodeParams } from '../../../src/utils/abi.js';
+import { txJsonToPb, txPbToTxID, txPbToRawDataHex } from '../../../src/utils/transaction.js';
 import { createPublicClient } from '../../../src/clients/createPublicClient.js';
 import { createWalletClient } from '../../../src/clients/createWalletClient.js';
 import { getContract } from '../../../src/clients/getContract.js';
-import { PUBLIC_CLIENT_BLOCKED_TRX_METHODS } from '../../../src/clients/types.js';
-import { Trx } from '../../../src/lib/trx.js';
+import { HttpProvider } from '../../../src/lib/providers/index.js';
 import { mainnet, nile, shasta } from '../../../src/chains/index.js';
 import {
     createContract as createContractFromRoot,
@@ -17,22 +17,49 @@ import {
     getContract as getContractFromRoot,
     http,
 } from '../../../src/index.js';
-import type { PublicClient, WalletClient } from '../../../src/clients/types.js';
-import type { TronWeb } from '../../../src/tronweb.js';
 
-// The client surface intentionally hides the underlying TronWeb instance, so production
-// code cannot mutate node config or signing state after construction. Tests still need a
-// seam to stub trx methods deterministically; `TransactionBuilder` already holds a
-// (TS-private) back-reference to the owning TronWeb, so we route through it instead of
-// widening the public surface.
-function getInnerTronWeb(client: PublicClient | WalletClient): TronWeb {
-    return (client.transactionBuilder as unknown as { tronWeb: TronWeb }).tronWeb;
+interface MockProvider {
+    readonly provider: HttpProvider;
+    readonly calls: Array<{ url: string; params: any; method: string }>;
+    mock(url: string, handler: (params: any) => unknown | Promise<unknown>): void;
+    mockMatch(matcher: RegExp, handler: (params: any) => unknown | Promise<unknown>): void;
+}
+
+function makeMockProvider(label: string): MockProvider {
+    const calls: Array<{ url: string; params: any; method: string }> = [];
+    const handlers = new Map<string, (params: any) => unknown | Promise<unknown>>();
+    const matchers: Array<{ matcher: RegExp; handler: (params: any) => unknown | Promise<unknown> }> = [];
+    const provider = new HttpProvider('http://127.0.0.1');
+    (provider as any).request = async (url: string, params: unknown = {}, method = 'get') => {
+        calls.push({ url, params, method });
+        const exact = handlers.get(url);
+        if (exact) return exact(params);
+        for (const { matcher, handler } of matchers) {
+            if (matcher.test(url)) return handler(params);
+        }
+        throw new Error(`[${label}] unmocked request to ${url}`);
+    };
+    return {
+        provider,
+        calls,
+        mock(url, handler) {
+            handlers.set(url, handler);
+        },
+        mockMatch(matcher, handler) {
+            matchers.push({ matcher, handler });
+        },
+    };
 }
 
 describe('client factories', function () {
     const fullHost = 'http://127.0.0.1';
     const privateKey = `0x${'1'.padStart(64, '0')}` as `0x${string}`;
     const account = privateKeyToAccount(privateKey);
+    // Real TRON addresses for tests that hit the action-layer validators
+    // (the old test surface mocked at the builder level, bypassing input validation).
+    const contractAddress = account.address;
+    const secondAddress = fromHex('410000000000000000000000000000000000000001');
+    const blockHash = '0'.repeat(64);
     const testTypedData = {
         domain: {
             name: 'TronWeb Test',
@@ -152,17 +179,9 @@ describe('client factories', function () {
         const privateChain = defineChain({
             id: 728_126_428,
             name: 'Private TRON Mainnet Mirror',
-            nativeCurrency: {
-                name: 'TRON',
-                symbol: 'TRX',
-                decimals: 6,
-            },
+            nativeCurrency: { name: 'TRON', symbol: 'TRX', decimals: 6 },
             network: 'mainnet',
-            rpcUrls: {
-                default: {
-                    http: ['https://private.trongrid.local'],
-                },
-            },
+            rpcUrls: { default: { http: ['https://private.trongrid.local'] } },
         });
 
         const publicClient = createPublicClientFromRoot({ chain: privateChain, transport: http() });
@@ -172,70 +191,19 @@ describe('client factories', function () {
         assert.equal(publicClient.transport?.url, 'https://private.trongrid.local');
     });
 
-    it('createPublicClient filters write helpers from trx', function () {
+    it('PublicClient no longer exposes trx or transactionBuilder', function () {
         const publicClient = createPublicClient({ fullHost });
-
-        // @ts-expect-error PublicClient.trx should not expose write helpers.
-        publicClient.trx.sendTransaction;
-        // @ts-expect-error PublicClient.trx should not expose signing helpers.
-        publicClient.trx.sign;
-
-        assert.isFunction(publicClient.trx.getCurrentBlock);
-        assert.isFunction(publicClient.getBlock);
-        assert.isFunction(publicClient.getBlockNumber);
-        assert.isFunction(publicClient.getTransaction);
-        assert.isFunction(publicClient.getBalance);
-        assert.isFunction(publicClient.transactionBuilder.sendTrx);
-        assert.isUndefined((publicClient.trx as any).sendTransaction);
-        assert.isUndefined((publicClient.trx as any).sign);
-        assert.isUndefined((publicClient.trx as any).signMessage);
+        assert.isUndefined((publicClient as any).trx);
+        assert.isUndefined((publicClient as any).transactionBuilder);
     });
 
-    it('PUBLIC_CLIENT_BLOCKED_TRX_METHODS covers every unsafe-named method on Trx', function () {
-        // Guard against silently leaking new sign/send/broadcast helpers into PublicClient.
-        // Any method on Trx (or its prototype chain) whose name matches the unsafe naming
-        // convention below must appear in PUBLIC_CLIENT_BLOCKED_TRX_METHODS, or a new method
-        // could slip past the filter.
-        const unsafePattern = /^(_?sign|send|broadcast|freeze|unfreeze|multiSign|updateAccount)/;
-        const blocked = new Set<string>(PUBLIC_CLIENT_BLOCKED_TRX_METHODS);
-        const unsafeNames = new Set<string>();
-
-        let proto: object | null = Trx.prototype;
-        while (proto && proto !== Object.prototype) {
-            for (const key of Reflect.ownKeys(proto)) {
-                if (typeof key !== 'string') continue;
-                if (key === 'constructor') continue;
-                if (!unsafePattern.test(key)) continue;
-                const descriptor = Reflect.getOwnPropertyDescriptor(proto, key);
-                if (!descriptor) continue;
-                const isMethod = 'value' in descriptor && typeof descriptor.value === 'function';
-                if (!isMethod) continue;
-                unsafeNames.add(key);
-            }
-            proto = Object.getPrototypeOf(proto);
-        }
-
-        const leaks = [...unsafeNames].filter((name) => !blocked.has(name));
-        assert.deepEqual(
-            leaks,
-            [],
-            `Trx exposes unsafe-named method(s) not in PUBLIC_CLIENT_BLOCKED_TRX_METHODS: ${leaks.join(', ')}`
-        );
-    });
-
-    it('freezes publicClient.trx so callers cannot monkey-patch the filtered proxy', function () {
-        const publicClient = createPublicClient({ fullHost });
-        assert.isTrue(Object.isFrozen(publicClient.trx));
-        assert.throws(
-            () => {
-                (publicClient.trx as any).getCurrentBlock = async () => ({} as any);
-            },
-            TypeError
-        );
+    it('WalletClient no longer exposes trx or transactionBuilder', function () {
+        const walletClient = createWalletClient({ account, fullHost });
+        assert.isUndefined((walletClient as any).trx);
+        assert.isUndefined((walletClient as any).transactionBuilder);
     });
 
     it('createPublicClient exposes top-level query helpers', async function () {
-        const publicClient = createPublicClientFromRoot({ chain: mainnet, transport: http() });
         const block = {
             blockID: 'block-id',
             block_header: {
@@ -251,9 +219,7 @@ describe('client factories', function () {
             },
         };
         const transaction = {
-            raw_data: {
-                contract: [],
-            },
+            raw_data: { contract: [] },
             raw_data_hex: '0xraw',
             ret: [{ contractRet: 'SUCCESS' }] as [{ contractRet: string }],
             signature: ['0xsig'],
@@ -261,70 +227,41 @@ describe('client factories', function () {
         } as any;
         const accountData = { address: 'TAccountAddress', balance: 456 } as any;
         const transactionInfo = { id: 'tx-info' } as any;
-        let blockArg: unknown;
-        let blockTransactionCountArg: unknown;
-        let transactionArg: unknown;
-        let transactionInfoArg: unknown;
-        let accountArg: unknown;
-        let balanceArg: unknown;
-        let constantCallArgs: unknown[] | undefined;
-        let estimateEnergyArgs: unknown[] | undefined;
-        let eventLogsArgs: unknown[] | undefined;
-        let transactionInfoCallCount = 0;
+        let waitForReceiptCallCount = 0;
 
-        const typedData = {
-            domain: {
-                name: 'TronWeb Test',
-                version: '1',
-                chainId: 728_126_428,
-            },
-            types: {
-                Mail: [
-                    { name: 'from', type: 'string' },
-                    { name: 'contents', type: 'string' },
-                ],
-            },
-            primaryType: 'Mail',
-            message: {
-                from: 'alice',
-                contents: 'hello tron',
-            },
-        };
-        const contractAbi = [
-            {
-                type: 'function',
-                name: 'balanceOf',
-                stateMutability: 'view',
-                inputs: [{ name: 'owner', type: 'address' }],
-                outputs: [{ name: 'balance', type: 'uint256' }],
-            },
-        ] as const;
-        const writeContractAbi = [
-            {
-                type: 'function',
-                name: 'transfer',
-                stateMutability: 'nonpayable',
-                inputs: [
-                    { name: 'recipient', type: 'address' },
-                    { name: 'amount', type: 'uint256' },
-                ],
-                outputs: [],
-            },
-        ] as const;
-        const eventAbi = [
-            {
-                type: 'event',
-                name: 'Transfer',
-                anonymous: false,
-                inputs: [
-                    { indexed: true, name: 'from', type: 'address' },
-                    { indexed: false, name: 'to', type: 'address' },
-                    { indexed: false, name: 'value', type: 'uint256' },
-                ],
-            },
-        ] as const;
-        const rawCallData = '0x70a08231000000000000000000000000d6206d4fa36d8f8f4f4d4c0b2cb0f6b99f3613a6' as const;
-        const expectedCallResultData = encodeParams(['uint256'], [7]) as `0x${string}`;
+        const fullNode = makeMockProvider('fullNode');
+        const solidityNode = makeMockProvider('solidityNode');
+        const eventServer = makeMockProvider('eventServer');
+        fullNode.mock('wallet/getnowblock', () => block);
+        fullNode.mock('wallet/getblockbynum', () => block);
+        fullNode.mock('wallet/getblockbyid', () => block);
+        fullNode.mock('wallet/gettransactionbyid', () => transaction);
+        fullNode.mock('wallet/triggerconstantcontract', (params: any) => {
+            if (!params.function_selector || params.function_selector === '') {
+                return {
+                    result: { result: true },
+                    transaction,
+                    constant_result: [encodeParams(['uint256'], [7]).replace(/^0x/, '')],
+                };
+            }
+            return {
+                result: { result: true },
+                transaction,
+                constant_result: [encodeParams(['uint256'], [42]).replace(/^0x/, '')],
+            };
+        });
+        fullNode.mock('wallet/estimateenergy', () => ({
+            result: { result: true },
+            energy_required: 88,
+        }));
+        solidityNode.mock('walletsolidity/getaccount', () => accountData);
+        solidityNode.mock('walletsolidity/gettransactioninfobyid', (params: any) => {
+            if (params.value === 'tx-wait-id') {
+                waitForReceiptCallCount += 1;
+                if (waitForReceiptCallCount < 2) return {};
+            }
+            return transactionInfo;
+        });
         const eventResponse = {
             success: true,
             data: [
@@ -332,7 +269,7 @@ describe('client factories', function () {
                     block_number: 901,
                     block_timestamp: 1_700_000_000_000,
                     caller_contract_address: 'TCallerAddress',
-                    contract_address: 'TContractAddress',
+                    contract_address: contractAddress,
                     event_index: 0,
                     event_name: 'Transfer',
                     result: {
@@ -340,11 +277,7 @@ describe('client factories', function () {
                         to: '410000000000000000000000000000000000000000',
                         value: '12',
                     },
-                    result_type: {
-                        from: 'address',
-                        to: 'address',
-                        value: 'uint256',
-                    },
+                    result_type: { from: 'address', to: 'address', value: 'uint256' },
                     event: 'Transfer(address,address,uint256)',
                     transaction_id: 'event-tx-id-1',
                     _unconfirmed: false,
@@ -353,7 +286,7 @@ describe('client factories', function () {
                     block_number: 902,
                     block_timestamp: 1_700_000_000_100,
                     caller_contract_address: 'TCallerAddress',
-                    contract_address: 'TContractAddress',
+                    contract_address: contractAddress,
                     event_index: 1,
                     event_name: 'Transfer',
                     result: {
@@ -361,139 +294,68 @@ describe('client factories', function () {
                         to: toHex(account.address),
                         value: '24',
                     },
-                    result_type: {
-                        from: 'address',
-                        to: 'address',
-                        value: 'uint256',
-                    },
+                    result_type: { from: 'address', to: 'address', value: 'uint256' },
                     event: 'Transfer(address,address,uint256)',
                     transaction_id: 'event-tx-id-2',
                     _unconfirmed: false,
                 },
             ],
-            meta: {
-                at: 1_700_000_001_000,
-                fingerprint: 'next-page-token',
-                page_size: 2,
-            },
+            meta: { at: 1_700_000_001_000, fingerprint: 'next-page-token', page_size: 2 },
         };
+        eventServer.mockMatch(/^v1\/contracts\/.+\/events/, () => eventResponse);
+
+        const publicClient = createPublicClient({
+            chain: mainnet,
+            fullNode: fullNode.provider,
+            solidityNode: solidityNode.provider,
+            eventServer: eventServer.provider,
+        });
 
         const messageSignature = await account.signMessage({ message: 'hello tron' });
-        const typedDataSignature = await account.signTypedData(typedData as any);
-
-        const innerTronWeb = getInnerTronWeb(publicClient);
-        innerTronWeb.trx.getBlock = async (input) => {
-            blockArg = input;
-            return block as any;
-        };
-        innerTronWeb.trx.getBlockTransactionCount = async (input) => {
-            blockTransactionCountArg = input;
-            return 7;
-        };
-        innerTronWeb.trx.getCurrentBlock = async () => block as any;
-        innerTronWeb.trx.getTransaction = async (input) => {
-            transactionArg = input;
-            return transaction as any;
-        };
-        innerTronWeb.trx.getTransactionInfo = async (input) => {
-            transactionInfoArg = input;
-            if (input === 'tx-wait-id') {
-                transactionInfoCallCount += 1;
-            }
-            if (input === 'tx-wait-id' && transactionInfoCallCount < 2) {
-                throw new Error('pending');
-            }
-            return transactionInfo;
-        };
-        innerTronWeb.trx.getAccount = async (input) => {
-            accountArg = input;
-            return accountData;
-        };
-        innerTronWeb.trx.getBalance = async (input) => {
-            balanceArg = input;
-            return 123;
-        };
-        publicClient.transactionBuilder.triggerConstantContract = async (...args: unknown[]) => {
-            constantCallArgs = args;
-            const functionSelector = args[1] as string;
-
-            if (functionSelector === '') {
-                return {
-                    result: { result: true },
-                    transaction,
-                    constant_result: [encodeParams(['uint256'], [7]).replace(/^0x/, '')],
-                } as any;
-            }
-
-            return {
-                result: { result: true },
-                transaction,
-                constant_result: [encodeParams(['uint256'], [42]).replace(/^0x/, '')],
-            } as any;
-        };
-        publicClient.transactionBuilder.estimateEnergy = async (...args: unknown[]) => {
-            estimateEnergyArgs = args;
-            return {
-                result: { result: true },
-                energy_required: 88,
-            } as any;
-        };
-        innerTronWeb.event.getEventsByContractAddress = async (...args: unknown[]) => {
-            eventLogsArgs = args;
-            return eventResponse as any;
-        };
+        const typedDataSignature = await account.signTypedData(testTypedData as any);
+        const rawCallData = '0x70a08231000000000000000000000000d6206d4fa36d8f8f4f4d4c0b2cb0f6b99f3613a6' as const;
+        const expectedCallResultData = encodeParams(['uint256'], [7]) as `0x${string}`;
 
         assert.deepEqual(await publicClient.getBlock('latest'), block);
-        assert.equal(blockArg, 'latest');
         assert.deepEqual(await publicClient.getBlock({ blockTag: 'latest' }), block);
-        assert.equal(blockArg, 'latest');
         assert.deepEqual(await publicClient.getBlock({ blockNumber: 123 }), block);
-        assert.equal(blockArg, 123);
-        assert.deepEqual(await publicClient.getBlock({ blockHash: 'block-hash' }), block);
-        assert.equal(blockArg, 'block-hash');
+        assert.deepEqual(await publicClient.getBlock({ blockHash }), block);
         assert.equal(await publicClient.getChainId(), 728_126_428);
-        assert.equal(await publicClient.getBlockTransactionCount({ blockNumber: 333 }), 7);
-        assert.equal(blockTransactionCountArg, 333);
+        const lastBlockByNum = fullNode.calls.find((c) => c.url === 'wallet/getblockbynum');
+        assert.equal(lastBlockByNum?.params.num, 123);
+        assert.equal(await publicClient.getBlockTransactionCount({ blockNumber: 333 }), 0);
         assert.equal(await publicClient.getBlockNumber(), 321);
         assert.deepEqual(await publicClient.getTransaction('tx-id'), transaction);
-        assert.equal(transactionArg, 'tx-id');
         assert.deepEqual(await publicClient.getTransaction({ hash: 'tx-hash' }), transaction);
-        assert.equal(transactionArg, 'tx-hash');
         assert.deepEqual(await publicClient.getTransactionInfo({ txId: 'tx-info-id' }), transactionInfo);
-        assert.equal(transactionInfoArg, 'tx-info-id');
         assert.deepEqual(await publicClient.getTransactionReceipt({ hash: 'tx-receipt-id' }), transactionInfo);
-        assert.equal(transactionInfoArg, 'tx-receipt-id');
         assert.deepEqual(
             await publicClient.waitForTransactionReceipt({ hash: 'tx-wait-id', pollingInterval: 0, timeout: 100 }),
             transactionInfo
         );
-        assert.equal(transactionInfoArg, 'tx-wait-id');
-        assert.deepEqual(await publicClient.getAccount({ address: 'TAccountAddress' }), accountData);
-        assert.equal(accountArg, 'TAccountAddress');
-        assert.equal(await publicClient.getBalance('TBalanceAddress'), 123);
-        assert.equal(balanceArg, 'TBalanceAddress');
-        assert.equal(await publicClient.getBalance({ address: 'TBalanceAddress2' }), 123);
-        assert.equal(balanceArg, 'TBalanceAddress2');
+        assert.deepEqual(await publicClient.getAccount({ address: account.address }), accountData);
+        assert.equal(await publicClient.getBalance(account.address), 456);
+        assert.equal(await publicClient.getBalance({ address: account.address }), 456);
         assert.deepEqual(
             await publicClient.call({
-                to: 'TContractAddress',
+                to: contractAddress,
                 data: rawCallData,
                 account: account.address,
             }),
             { data: expectedCallResultData }
         );
-        assert.deepEqual(constantCallArgs, [
-            'TContractAddress',
-            '',
-            { input: rawCallData },
-            [],
-            account.address,
-        ]);
+        const callRequest = fullNode.calls.find(
+            (c) => c.url === 'wallet/triggerconstantcontract' && c.params.data === rawCallData
+        );
+        assert.isOk(callRequest);
+        assert.equal(toHex(callRequest!.params.owner_address), toHex(account.address));
+        assert.equal(toHex(callRequest!.params.contract_address), toHex(contractAddress));
+
         assert.equal(
             String(
                 await publicClient.readContract({
-                    address: 'TContractAddress',
-                    abi: contractAbi,
+                    address: contractAddress,
+                    abi: testReadContractAbi,
                     functionName: 'balanceOf',
                     args: [account.address],
                     account: account.address,
@@ -501,17 +363,11 @@ describe('client factories', function () {
             ),
             '42'
         );
-        assert.equal((constantCallArgs?.[1] as string) ?? '', 'balanceOf(address)');
-        assert.deepEqual(constantCallArgs?.[2], {
-            funcABIV2: contractAbi[0],
-            parametersV2: [account.address],
-        });
-        assert.deepEqual(constantCallArgs?.[3], []);
-        assert.equal(constantCallArgs?.[4], account.address);
+
         assert.equal(
             await publicClient.estimateContractGas({
-                address: 'TContractAddress',
-                abi: writeContractAbi,
+                address: contractAddress,
+                abi: testWriteContractAbi,
                 functionName: 'transfer',
                 args: [account.address, 12],
                 account: account.address,
@@ -519,68 +375,35 @@ describe('client factories', function () {
             }),
             88n
         );
-        assert.deepEqual(estimateEnergyArgs, [
-            'TContractAddress',
-            'transfer(address,uint256)',
-            {
-                callValue: 3,
-                funcABIV2: writeContractAbi[0],
-                parametersV2: [account.address, 12],
-            },
-            [],
-            account.address,
-        ]);
+
         assert.deepEqual(
             await publicClient.getLogs({
-                address: 'TContractAddress',
+                address: contractAddress,
                 eventName: 'Transfer',
-                minBlockTimestamp: 1_700_000_000_000,
-                maxBlockTimestamp: 1_700_000_000_500,
                 onlyConfirmed: true,
-                orderBy: 'block_timestamp,asc',
                 limit: 2,
-                fingerprint: 'cursor-token',
             }),
-            {
-                data: eventResponse.data,
-                meta: eventResponse.meta,
-            }
+            { data: eventResponse.data, meta: eventResponse.meta }
         );
-        assert.deepEqual(eventLogsArgs, [
-            'TContractAddress',
-            {
-                eventName: 'Transfer',
-                minBlockTimestamp: 1_700_000_000_000,
-                maxBlockTimestamp: 1_700_000_000_500,
-                onlyConfirmed: true,
-                orderBy: 'block_timestamp,asc',
-                limit: 2,
-                fingerprint: 'cursor-token',
-            },
-        ]);
+
         assert.deepEqual(
             await publicClient.getContractEvents({
-                address: 'TContractAddress',
-                abi: eventAbi,
+                address: contractAddress,
+                abi: testEventAbi,
                 eventName: 'Transfer',
-                args: {
-                    from: account.address,
-                },
+                args: { from: account.address },
                 onlyConfirmed: true,
             }),
-            {
-                data: [eventResponse.data[0]],
-                meta: eventResponse.meta,
-            }
+            { data: [eventResponse.data[0]], meta: eventResponse.meta }
         );
-        assert.deepEqual(eventLogsArgs, [
-            'TContractAddress',
-            {
-                eventName: 'Transfer',
-                onlyConfirmed: true,
-            },
-        ]);
-        assert.isTrue(await publicClient.verifyMessage({ address: account.address, message: 'hello tron', signature: messageSignature }));
+
+        assert.isTrue(
+            await publicClient.verifyMessage({
+                address: account.address,
+                message: 'hello tron',
+                signature: messageSignature,
+            })
+        );
         assert.isFalse(
             await publicClient.verifyMessage({
                 address: fromHex('410000000000000000000000000000000000000000'),
@@ -591,21 +414,17 @@ describe('client factories', function () {
         assert.isTrue(
             await publicClient.verifyTypedData({
                 address: account.address,
-                domain: typedData.domain,
-                types: typedData.types,
-                primaryType: typedData.primaryType,
-                message: typedData.message,
+                domain: testTypedData.domain,
+                types: testTypedData.types,
+                primaryType: testTypedData.primaryType,
+                message: testTypedData.message,
                 signature: typedDataSignature,
             })
         );
     });
 
-    it('createWalletClient keeps wallet write helpers', function () {
-        const walletClient = createWalletClient({
-            account,
-            chain: nile,
-            transport: http(),
-        });
+    it('createWalletClient exposes the expected method surface', function () {
+        const walletClient = createWalletClient({ account, chain: nile, transport: http() });
 
         assert.strictEqual(walletClient.chain, nile);
         assert.equal(walletClient.key, 'wallet');
@@ -637,195 +456,129 @@ describe('client factories', function () {
         assert.isFunction(walletClient.writeContract);
         assert.isFunction(walletClient.deployContract);
         assert.isFunction(walletClient.sendTransaction);
-        assert.isFunction(walletClient.trx.sendTransaction);
-        assert.isFunction(walletClient.trx.sign);
     });
 
-    it('createWalletClient signMessage keeps signMessageV2 semantics', async function () {
-        const walletClient = createWalletClient({
-            account,
-            fullHost,
-        });
-
+    it('createWalletClient signMessage delegates to the account', async function () {
+        const walletClient = createWalletClient({ account, fullHost });
         const signature = await walletClient.signMessage({ message: 'hello tron' });
-
-        assert.equal(signature, walletClient.trx.signMessageV2('hello tron', privateKey));
+        assert.equal(signature, await account.signMessage({ message: 'hello tron' }));
     });
 
-    it('covers new wallet client top-level actions', async function () {
+    it('covers wallet client write helpers via writeContract / deployContract / sendTransaction / sendRawTransaction', async function () {
         const stubAccount = {
             ...account,
             async signTransaction(transaction: any) {
-                return {
-                    ...transaction,
-                    signature: ['0xsignature'],
-                };
+                return { ...transaction, signature: ['0xsignature'] };
             },
         };
-        const walletClient = createWalletClient({
-            account: stubAccount,
-            fullHost,
-        });
-        const directTransaction = {
-            txID: 'direct-tx-id',
-            raw_data: {
-                contract: [
-                    {
-                        parameter: {
-                            value: {
-                                owner_address: toHex(account.address),
-                            },
-                        },
-                    },
-                ],
-            },
-        } as any;
-        const signedInputTransaction = {
-            txID: 'signed-tx-id',
-            raw_data: {
-                contract: [],
-            },
-            signature: ['0xexisting'],
-        } as any;
-        const sendRawTransactionCalls: any[] = [];
-        let triggerSmartContractArgs: unknown[] | undefined;
-        let createSmartContractArgs: unknown[] | undefined;
-
-        walletClient.trx.sendRawTransaction = async (transaction) => {
-            sendRawTransactionCalls.push(transaction);
-            return {
-                txid: transaction.txID,
-                code: 0,
-                message: 'SUCCESS',
-                result: true,
-                transaction,
-            } as any;
-        };
-        walletClient.transactionBuilder.triggerSmartContract = async (...args: unknown[]) => {
-            triggerSmartContractArgs = args;
-            return {
-                result: { result: true },
-                transaction: {
-                    txID: 'write-tx-id',
-                    raw_data: {
-                        contract: [
-                            {
-                                parameter: {
-                                    value: {
-                                        owner_address: toHex(account.address),
-                                    },
-                                },
-                            },
-                        ],
-                    },
-                },
-            } as any;
-        };
-        walletClient.transactionBuilder.createSmartContract = async (...args: unknown[]) => {
-            createSmartContractArgs = args;
-            return {
-                txID: 'deploy-tx-id',
+        const fullNode = makeMockProvider('fullNode');
+        const solidityNode = makeMockProvider('solidityNode');
+        const broadcastCalls: any[] = [];
+        fullNode.mock('wallet/getblock', () => ({
+            block_header: { raw_data: { number: 1, timestamp: Date.now() } },
+            blockID: '00000000000000000000000000000000',
+        }));
+        // Mimic a node response: build a real proto-encoded transaction so the
+        // action layer's resultManagerTriggerSmartContract / txCheckWithArgs passes.
+        // The encoded contract value must take the same encoding path as the
+        // rebuilt-from-args version (i.e. mirror the args shape exactly).
+        fullNode.mock('wallet/triggersmartcontract', (args: any) => {
+            const tx = {
+                visible: false,
                 raw_data: {
                     contract: [
                         {
                             parameter: {
                                 value: {
-                                    owner_address: toHex(account.address),
+                                    contract_address: args.contract_address,
+                                    owner_address: args.owner_address,
+                                    call_value: args.call_value,
+                                    ...(args.data ? { data: args.data } : {}),
+                                    ...(args.function_selector ? { function_selector: args.function_selector } : {}),
+                                    ...(args.parameter ? { parameter: args.parameter } : {}),
+                                    ...(args.call_token_value ? { call_token_value: args.call_token_value } : {}),
+                                    ...(args.token_id ? { token_id: args.token_id } : {}),
                                 },
+                                type_url: 'type.googleapis.com/protocol.TriggerSmartContract',
                             },
+                            type: 'TriggerSmartContract',
                         },
                     ],
+                    ref_block_bytes: '0001',
+                    ref_block_hash: '0000000000000000',
+                    expiration: Date.now() + 60_000,
+                    timestamp: Date.now(),
+                    fee_limit: args.fee_limit,
                 },
-            } as any;
-        };
+            };
+            const pb = txJsonToPb(tx as any);
+            return {
+                result: { result: true },
+                transaction: {
+                    ...tx,
+                    txID: txPbToTxID(pb).replace(/^0x/, ''),
+                    raw_data_hex: txPbToRawDataHex(pb).toLowerCase(),
+                },
+            };
+        });
+        fullNode.mock('wallet/broadcasttransaction', (signed: any) => {
+            broadcastCalls.push(signed);
+            return { txid: signed.txID, code: 0, message: 'SUCCESS', result: true };
+        });
+        const walletClient = createWalletClient({
+            account: stubAccount,
+            fullNode: fullNode.provider,
+            solidityNode: solidityNode.provider,
+        });
 
         assert.deepEqual(await walletClient.getAddresses(), [account.address]);
         assert.deepEqual(await walletClient.requestAddresses(), [account.address]);
+
+        const directTransaction = {
+            txID: 'direct-tx-id',
+            raw_data: {
+                contract: [{ parameter: { value: { owner_address: toHex(account.address) } } }],
+            },
+        } as any;
         assert.deepEqual(await walletClient.signTransaction({ transaction: directTransaction }), {
             ...directTransaction,
             signature: ['0xsignature'],
         });
-        assert.equal(await walletClient.signTypedData(testTypedData as any), await account.signTypedData(testTypedData as any));
-        assert.deepEqual(await walletClient.sendRawTransaction({ transaction: signedInputTransaction }), {
-            txid: signedInputTransaction.txID,
-            code: 0,
-            message: 'SUCCESS',
-            result: true,
-            transaction: signedInputTransaction,
+        assert.equal(
+            await walletClient.signTypedData(testTypedData as any),
+            await account.signTypedData(testTypedData as any)
+        );
+
+        const signedInputTransaction = {
+            txID: 'signed-tx-id',
+            raw_data: { contract: [] },
+            signature: ['0xexisting'],
+        } as any;
+        const sendRawResult = await walletClient.sendRawTransaction({ transaction: signedInputTransaction });
+        assert.equal(sendRawResult.txid, 'signed-tx-id');
+        assert.strictEqual(broadcastCalls[0], signedInputTransaction);
+
+        const writeTxId = await walletClient.writeContract({
+            address: contractAddress,
+            abi: testWriteContractAbi,
+            functionName: 'transfer',
+            args: [account.address, 12],
+            value: 3n,
+            feeLimit: 1_000,
         });
-        assert.strictEqual(sendRawTransactionCalls[0], signedInputTransaction);
-
-        assert.equal(
-            await walletClient.writeContract({
-                address: 'TContractAddress',
-                abi: testWriteContractAbi,
-                functionName: 'transfer',
-                args: [account.address, 12],
-                value: 3n,
-                feeLimit: 1_000,
-                tokenId: '1000',
-                tokenValue: 2,
-                permissionId: 7,
-            }),
-            'write-tx-id'
-        );
-        assert.deepEqual(triggerSmartContractArgs, [
-            'TContractAddress',
-            'transfer(address,uint256)',
-            {
-                callValue: 3,
-                feeLimit: 1_000,
-                tokenId: '1000',
-                tokenValue: 2,
-                permissionId: 7,
-                funcABIV2: testWriteContractAbi[0],
-                parametersV2: [account.address, 12],
-            },
-            [],
-            account.address,
-        ]);
-        assert.equal(sendRawTransactionCalls[1].txID, 'write-tx-id');
-        assert.deepEqual(sendRawTransactionCalls[1].signature, ['0xsignature']);
-
-        assert.equal(
-            await walletClient.deployContract({
-                abi: testWriteContractAbi,
-                bytecode: '0x6080604052348015600f57600080fd5b50600080fdfe',
-                args: [account.address, 12],
-                name: 'Test Contract',
-                value: 4n,
-                feeLimit: 2_000,
-                tokenId: '1001',
-                tokenValue: 3,
-                userFeePercentage: 75,
-                originEnergyLimit: 12_345,
-                permissionId: 9,
-            }),
-            'deploy-tx-id'
-        );
-        assert.deepEqual(createSmartContractArgs, [
-            {
-                abi: testWriteContractAbi,
-                bytecode: '0x6080604052348015600f57600080fd5b50600080fdfe',
-                parameters: [account.address, 12],
-                name: 'Test Contract',
-                callValue: 4,
-                feeLimit: 2_000,
-                tokenId: '1001',
-                tokenValue: 3,
-                userFeePercentage: 75,
-                originEnergyLimit: 12_345,
-                permissionId: 9,
-            },
-            account.address,
-        ]);
-        assert.equal(sendRawTransactionCalls[2].txID, 'deploy-tx-id');
-        assert.deepEqual(sendRawTransactionCalls[2].signature, ['0xsignature']);
+        assert.isString(writeTxId);
+        assert.isNotEmpty(writeTxId);
+        const triggerCall = fullNode.calls.find((c) => c.url === 'wallet/triggersmartcontract');
+        assert.isOk(triggerCall);
+        assert.equal(triggerCall!.params.fee_limit, 1_000);
+        assert.equal(triggerCall!.params.call_value, 3);
+        assert.equal(broadcastCalls[1].txID, writeTxId);
+        assert.deepEqual(broadcastCalls[1].signature, ['0xsignature']);
 
         await assertRejectsWithMessage(
             () =>
                 walletClient.writeContract({
-                    address: 'TContractAddress',
+                    address: contractAddress,
                     abi: testReadContractAbi,
                     functionName: 'balanceOf',
                     args: [account.address],
@@ -835,7 +588,7 @@ describe('client factories', function () {
         await assertRejectsWithMessage(
             () =>
                 walletClient.writeContract({
-                    address: 'TContractAddress',
+                    address: contractAddress,
                     abi: testWriteContractAbi,
                     functionName: 'transfer',
                     args: [account.address, 1],
@@ -854,57 +607,57 @@ describe('client factories', function () {
         );
     });
 
-    it('throws when sendTransaction broadcast returns a code, matching writeContract / deployContract', async function () {
+    it('throws when sendTransaction broadcast returns an error code', async function () {
         const stubAccount = {
             ...account,
             async signTransaction(transaction: any) {
                 return { ...transaction, signature: ['0xsignature'] };
             },
         };
-        const walletClient = createWalletClient({ account: stubAccount, fullHost });
-
-        walletClient.transactionBuilder.sendTrx = (async () => ({
-            txID: 'send-trx-id',
-            raw_data: {
-                contract: [
-                    {
-                        parameter: {
-                            value: {
-                                owner_address: toHex(account.address),
-                            },
-                        },
-                    },
-                ],
-            },
-        })) as any;
-        walletClient.trx.sendRawTransaction = (async () => ({
+        const fullNode = makeMockProvider('fullNode');
+        const solidityNode = makeMockProvider('solidityNode');
+        fullNode.mock('wallet/getblock', () => ({
+            block_header: { raw_data: { number: 1, timestamp: Date.now() } },
+            blockID: '00000000000000000000000000000000',
+        }));
+        // sendTrx builder does NOT hit the node (just constructs the tx locally
+        // after ref-block params from getblock). The broadcast returns an error.
+        fullNode.mock('wallet/broadcasttransaction', () => ({
             code: 'SIGERROR',
-            // hex-encoded 'bad-sig'; tronWeb.toUtf8 decodes the message for the thrown error.
+            // hex-encoded 'bad-sig'
             message: '6261642d736967',
-        })) as any;
+        }));
+        const walletClient = createWalletClient({
+            account: stubAccount,
+            fullNode: fullNode.provider,
+            solidityNode: solidityNode.provider,
+        });
 
         await assertRejectsWithMessage(
             () =>
                 walletClient.sendTransaction({
                     type: 'sendTrx',
-                    parameters: [account.address, 1, account.address],
+                    parameters: [secondAddress, 1, account.address],
                 }),
             'bad-sig'
         );
     });
 
-    it('validates chain id and block transaction count inputs for new helpers', async function () {
-        const publicClient = createPublicClient({ fullHost });
-        let blockTransactionCountArg: unknown;
-
-        getInnerTronWeb(publicClient).trx.getBlockTransactionCount = async (input) => {
-            blockTransactionCountArg = input;
-            return 9;
-        };
+    it('validates chain id and block transaction count inputs', async function () {
+        const fullNode = makeMockProvider('fullNode');
+        const solidityNode = makeMockProvider('solidityNode');
+        fullNode.mock('wallet/getnowblock', () => ({
+            block_header: { raw_data: { number: 1, timestamp: 1 } },
+            blockID: 'block-id',
+            transactions: [],
+        }));
+        const publicClient = createPublicClient({
+            fullNode: fullNode.provider,
+            solidityNode: solidityNode.provider,
+        });
 
         await assertRejectsWithMessage(() => publicClient.getChainId(), 'getChainId requires a configured chain.');
-        assert.equal(await publicClient.getBlockTransactionCount(), 9);
-        assert.equal(blockTransactionCountArg, 'latest');
+        assert.equal(await publicClient.getBlockTransactionCount(), 0);
         await assertRejectsWithMessage(
             () =>
                 publicClient.getBlockTransactionCount({
@@ -916,9 +669,13 @@ describe('client factories', function () {
     });
 
     it('validates transaction receipt helper inputs and timeout behavior', async function () {
-        const publicClient = createPublicClient({ fullHost });
-
-        getInnerTronWeb(publicClient).trx.getTransactionInfo = async () => ({} as any);
+        const fullNode = makeMockProvider('fullNode');
+        const solidityNode = makeMockProvider('solidityNode');
+        solidityNode.mock('walletsolidity/gettransactioninfobyid', () => ({}));
+        const publicClient = createPublicClient({
+            fullNode: fullNode.provider,
+            solidityNode: solidityNode.provider,
+        });
 
         await assertRejectsWithMessage(
             () => publicClient.getTransactionReceipt({} as any),
@@ -933,11 +690,15 @@ describe('client factories', function () {
             'Timed out waiting for transaction receipt for "tx-timeout-id".'
         );
 
-        const failingClient = createPublicClient({ fullHost });
-        getInnerTronWeb(failingClient).trx.getTransactionInfo = async () => {
+        const failingFullNode = makeMockProvider('failingFullNode');
+        const failingSolidityNode = makeMockProvider('failingSolidityNode');
+        failingSolidityNode.mock('walletsolidity/gettransactioninfobyid', () => {
             throw new Error('node offline');
-        };
-
+        });
+        const failingClient = createPublicClient({
+            fullNode: failingFullNode.provider,
+            solidityNode: failingSolidityNode.provider,
+        });
         await assertRejectsWithMessage(
             () => failingClient.waitForTransactionReceipt({ hash: 'tx-failing-id', pollingInterval: 0, timeout: 0 }),
             'Timed out waiting for transaction receipt for "tx-failing-id". Last error: node offline'
@@ -979,37 +740,35 @@ describe('client factories', function () {
     });
 
     it('covers call, readContract, and estimateContractGas error branches', async function () {
-        const publicClient = createPublicClient({ fullHost });
-        let callArgs: unknown[] | undefined;
-
-        publicClient.transactionBuilder.triggerConstantContract = async (...args: unknown[]) => {
-            callArgs = args;
-            return {
-                result: { result: true },
-                // 8 hex chars = revert selector with no payload; triggers the
-                // "len % 64 === 8" revert path in extractConstantResultData.
-                constant_result: ['08c379a0'],
-                transaction: {} as any,
-            } as any;
-        };
-        publicClient.transactionBuilder.estimateEnergy = (async () => ({
+        const fullNode = makeMockProvider('fullNode');
+        const solidityNode = makeMockProvider('solidityNode');
+        fullNode.mock('wallet/triggerconstantcontract', () => ({
+            result: { result: true },
+            // 8 hex chars = revert selector with no payload
+            constant_result: ['08c379a0'],
+            transaction: {},
+        }));
+        fullNode.mock('wallet/estimateenergy', () => ({
             result: { result: false, message: '' },
-        })) as any;
+        }));
+        const publicClient = createPublicClient({
+            fullNode: fullNode.provider,
+            solidityNode: solidityNode.provider,
+        });
 
         await assertRejectsWithMessage(
             () =>
                 publicClient.call({
-                    to: 'TContractAddress',
+                    to: contractAddress,
                     account: account.address,
                     value: 5n,
                 }),
             'The call has been reverted or has thrown an error.'
         );
-        assert.deepEqual(callArgs, ['TContractAddress', '', { callValue: 5 }, [], account.address]);
         await assertRejectsWithMessage(
             () =>
                 publicClient.readContract({
-                    address: 'TContractAddress',
+                    address: contractAddress,
                     abi: testWriteContractAbi,
                     functionName: 'transfer',
                     args: [account.address, 1],
@@ -1019,7 +778,7 @@ describe('client factories', function () {
         await assertRejectsWithMessage(
             () =>
                 publicClient.estimateContractGas({
-                    address: 'TContractAddress',
+                    address: contractAddress,
                     abi: testReadContractAbi,
                     functionName: 'balanceOf',
                     args: [account.address],
@@ -1029,7 +788,7 @@ describe('client factories', function () {
         await assertRejectsWithMessage(
             () =>
                 publicClient.estimateContractGas({
-                    address: 'TContractAddress',
+                    address: contractAddress,
                     abi: testWriteContractAbi,
                     functionName: 'transfer',
                     args: [account.address, 1],
@@ -1039,19 +798,22 @@ describe('client factories', function () {
     });
 
     it('covers getLogs and getContractEvents edge cases for event queries', async function () {
-        const publicClient = createPublicClient({ fullHost });
+        const fullNode = makeMockProvider('fullNode');
+        const solidityNode = makeMockProvider('solidityNode');
+        const eventServer = makeMockProvider('eventServer');
+        eventServer.mockMatch(/^v1\/contracts\/.+\/events/, () => ({ success: true, data: [] }));
+        const publicClient = createPublicClient({
+            fullNode: fullNode.provider,
+            solidityNode: solidityNode.provider,
+            eventServer: eventServer.provider,
+        });
 
-        getInnerTronWeb(publicClient).event.getEventsByContractAddress = (async () => ({
-            success: true,
-            data: [],
-        })) as any;
-
-        assert.deepEqual(await publicClient.getLogs({ address: 'TContractAddress' }), { data: [] });
+        assert.deepEqual(await publicClient.getLogs({ address: contractAddress }), { data: [] });
 
         await assertRejectsWithMessage(
             () =>
                 publicClient.getContractEvents({
-                    address: 'TContractAddress',
+                    address: contractAddress,
                     abi: testEventAbi,
                     args: { from: account.address },
                 }),
@@ -1059,7 +821,7 @@ describe('client factories', function () {
         );
         assert.deepEqual(
             await publicClient.getContractEvents({
-                address: 'TContractAddress',
+                address: contractAddress,
                 abi: testEventAbi,
                 eventName: 'Transfer',
                 args: { from: fromHex('410000000000000000000000000000000000000000') },

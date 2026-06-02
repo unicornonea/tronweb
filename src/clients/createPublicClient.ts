@@ -1,62 +1,14 @@
-import { TronWeb } from '../tronweb.js';
-import type { Trx } from '../lib/trx.js';
-import {
-    PUBLIC_CLIENT_BLOCKED_TRX_METHODS,
-    type PublicClient,
-    type PublicClientConfig,
-    type PublicClientTrx,
-} from './types.js';
+import { HttpProvider } from '../lib/providers/index.js';
+import type { PublicClient, PublicClientConfig } from './types.js';
 import { createClientMetadata } from './createClientMetadata.js';
 import { createClientQueryActions } from './createClientQueryActions.js';
-import { disableClientTronWebMutators, resolveClientConfig } from './resolveClientConfig.js';
-
-const publicClientBlockedTrxMethods = new Set<PropertyKey>(PUBLIC_CLIENT_BLOCKED_TRX_METHODS);
-
-function createPublicClientTrx(trx: Trx): PublicClientTrx {
-    // Build a frozen filtered proxy: write methods are stripped via the block
-    // list, and the surface itself is non-writable + frozen so callers cannot
-    // monkey-patch the read methods.
-    const publicTrx: Record<PropertyKey, unknown> = {};
-    let prototype = Object.getPrototypeOf(trx);
-
-    while (prototype && prototype !== Object.prototype) {
-        for (const key of Reflect.ownKeys(prototype)) {
-            if (key === 'constructor' || publicClientBlockedTrxMethods.has(key) || key in publicTrx) continue;
-
-            const descriptor = Reflect.getOwnPropertyDescriptor(prototype, key);
-            if (!descriptor) continue;
-
-            const value = Reflect.get(trx, key);
-
-            if ('value' in descriptor && typeof value === 'function') {
-                Object.defineProperty(publicTrx, key, {
-                    configurable: false,
-                    enumerable: true,
-                    value: (value as (...args: unknown[]) => unknown).bind(trx),
-                    writable: false,
-                });
-                continue;
-            }
-
-            Object.defineProperty(publicTrx, key, {
-                configurable: false,
-                enumerable: true,
-                get: () => Reflect.get(trx, key),
-            });
-        }
-
-        prototype = Object.getPrototypeOf(prototype);
-    }
-
-    return Object.freeze(publicTrx) as PublicClientTrx;
-}
+import { resolveClientProviders } from './resolveClientConfig.js';
 
 /**
- * Create a read-only TronWeb client.
+ * Create a read-only client.
  *
- * The returned client proxies `trx` and `transactionBuilder` from an internal
- * TronWeb instance. No private key is involved — all state-changing operations
- * require a WalletClient.
+ * The client wraps HTTP providers directly — no internal TronWeb instance is
+ * created. All state-changing operations require a WalletClient.
  *
  * @example
  * ```ts
@@ -64,14 +16,13 @@ function createPublicClientTrx(trx: Trx): PublicClientTrx {
  *   chain: nile,
  *   transport: http(),
  * });
- * const block = await publicClient.trx.getCurrentBlock();
+ * const block = await publicClient.getBlock({ blockTag: 'latest' });
  * ```
  */
 export function createPublicClient(config: PublicClientConfig): PublicClient {
     const { key, name } = config;
-    const { chain, transport, tronWebConfig } = resolveClientConfig(config);
-    const tronWeb = disableClientTronWebMutators(new TronWeb({ ...tronWebConfig }));
-    const publicTrx = createPublicClientTrx(tronWeb.trx);
+    const { chain, transport, fullNode, solidityNode, eventServer, feeLimit } = resolveClientProviders(config);
+
     const metadata = createClientMetadata({
         key,
         name,
@@ -79,7 +30,13 @@ export function createPublicClient(config: PublicClientConfig): PublicClient {
         defaultName: 'Public Client',
         type: 'publicClient',
     });
-    const queryActions = createClientQueryActions({ chain, tronWeb, trx: tronWeb.trx });
+    const queryActions = createClientQueryActions({
+        chain,
+        fullNode,
+        solidityNode,
+        eventServer,
+        feeLimit,
+    });
 
     const client: PublicClient = {
         ...metadata,
@@ -90,13 +47,10 @@ export function createPublicClient(config: PublicClientConfig): PublicClient {
         get transport() {
             return transport;
         },
-        get trx() {
-            return publicTrx;
-        },
-        get transactionBuilder() {
-            return tronWeb.transactionBuilder;
-        },
     };
 
     return client;
 }
+
+// Re-export for backwards-compat with anyone importing the provider type directly.
+export type { HttpProvider };
