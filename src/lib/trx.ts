@@ -6,7 +6,9 @@ import { fromHex, toHex } from '../utils/address.js';
 import { Validator } from '../paramValidator/index.js';
 import { txCheck } from '../utils/transaction.js';
 import { ecRecover } from '../utils/crypto.js';
-import { Block, GetTransactionResponse, BlockWithoutDetail, BlockHeaderRef } from '../types/APIResponse.js';
+import { Block, GetTransactionResponse, BlockHeaderRef } from '../types/APIResponse.js';
+import * as trxActions from './actions/trx.js';
+import * as tbActions from './actions/transactionBuilder.js';
 import {
     Token,
     Account,
@@ -17,7 +19,6 @@ import {
     AddressOptions,
     Proposal,
     ChainParameter,
-    BroadcastHexReturn,
     AccountResourceMessage,
     Address,
     Exchange,
@@ -39,7 +40,7 @@ type SignedStringOrSignedTransaction<T extends string | Transaction | SignedTran
 
 export class Trx {
     private tronWeb: TronWeb;
-    private cache: { contracts: Record<string, any> };
+    cache: { contracts: Record<string, any> };
     private validator: Validator;
 
     signMessage;
@@ -77,7 +78,7 @@ export class Trx {
     }
 
     getCurrentBlock(): Promise<Block> {
-        return this.tronWeb.fullNode.request('wallet/getnowblock');
+        return trxActions.getCurrentBlock(this.tronWeb.fullNode);
     }
 
     getConfirmedCurrentBlock(): Promise<Block> {
@@ -85,60 +86,21 @@ export class Trx {
     }
 
     async getBlock(block: 'earliest' | 'latest' | number | string | false = this.tronWeb.defaultBlock): Promise<Block> {
-        if (block === false) {
-            throw new Error('No block identifier provided');
-        }
-
-        if (block == 'earliest') block = 0;
-
-        if (block == 'latest') return this.getCurrentBlock();
-
-        if (isNaN(+block) && utils.isHex(block.toString())) return this.getBlockByHash(block as string);
-
-        return this.getBlockByNumber(block as number);
+        return trxActions.getBlock(this.tronWeb.fullNode, block);
     }
 
     async getBlockByHash(blockHash: string): Promise<Block> {
-        const block = await this.tronWeb.fullNode.request<Block>(
-            'wallet/getblockbyid',
-            {
-                value: blockHash,
-            },
-            'post'
-        );
-        if (!Object.keys(block).length) {
-            throw new Error('Block not found');
-        }
-        return block;
+        return trxActions.getBlockByHash(this.tronWeb.fullNode, blockHash);
     }
 
     async getBlockByNumber(blockID: number): Promise<Block> {
-        if (!utils.isInteger(blockID) || blockID < 0) {
-            throw new Error('Invalid block number provided');
-        }
-
-        return this.tronWeb.fullNode
-            .request<Block>(
-                'wallet/getblockbynum',
-                {
-                    num: parseInt(blockID),
-                },
-                'post'
-            )
-            .then((block) => {
-                if (!Object.keys(block).length) {
-                    throw new Error('Block not found');
-                }
-
-                return block;
-            });
+        return trxActions.getBlockByNumber(this.tronWeb.fullNode, blockID);
     }
 
     async getBlockTransactionCount(
         block: 'earliest' | 'latest' | number | string | false = this.tronWeb.defaultBlock
     ): Promise<number> {
-        const { transactions = [] } = await this.getBlock(block);
-        return transactions.length;
+        return trxActions.getBlockTransactionCount(this.tronWeb.fullNode, block);
     }
 
     async getChainId(): Promise<number> {
@@ -173,17 +135,7 @@ export class Trx {
     }
 
     async getTransaction(transactionID: string): Promise<GetTransactionResponse> {
-        const transaction = await this.tronWeb.fullNode.request<GetTransactionResponse>(
-            'wallet/gettransactionbyid',
-            {
-                value: transactionID,
-            },
-            'post'
-        );
-        if (!Object.keys(transaction).length) {
-            throw new Error('Transaction not found');
-        }
-        return transaction;
+        return trxActions.getTransaction(this.tronWeb.fullNode, transactionID);
     }
 
     async getConfirmedTransaction(transactionID: string): Promise<GetTransactionResponse> {
@@ -205,7 +157,7 @@ export class Trx {
     }
 
     getTransactionInfo(transactionID: string): Promise<TransactionInfo> {
-        return this.tronWeb.solidityNode.request('walletsolidity/gettransactioninfobyid', { value: transactionID }, 'post');
+        return trxActions.getTransactionInfo(this.tronWeb.solidityNode, transactionID);
     }
 
     getTransactionsToAddress(
@@ -284,19 +236,7 @@ export class Trx {
     }
 
     async getAccount(address = this.tronWeb.defaultAddress.hex): Promise<Account> {
-        if (!this.tronWeb.isAddress(address as Address)) {
-            throw new Error('Invalid address provided');
-        }
-
-        address = toHex(address as string);
-
-        return this.tronWeb.solidityNode.request(
-            'walletsolidity/getaccount',
-            {
-                address,
-            },
-            'post'
-        );
+        return trxActions.getAccount(this.tronWeb.solidityNode, address as string);
     }
 
     getAccountById(id: string): Promise<Account> {
@@ -333,8 +273,7 @@ export class Trx {
     }
 
     async getBalance(address = this.tronWeb.defaultAddress.hex): Promise<number> {
-        const { balance = 0 } = await this.getAccount(address);
-        return balance;
+        return trxActions.getBalance(this.tronWeb.solidityNode, address as string);
     }
 
     async getUnconfirmedAccount(address = this.tronWeb.defaultAddress.hex): Promise<Account> {
@@ -810,43 +749,11 @@ export class Trx {
     }
 
     async sendRawTransaction<T extends SignedTransaction>(signedTransaction: T): Promise<BroadcastReturn<T>> {
-        if (!utils.isObject(signedTransaction)) {
-            throw new Error('Invalid transaction provided');
-        }
-
-        if (!signedTransaction.signature || !utils.isArray(signedTransaction.signature)) {
-            throw new Error('Transaction is not signed');
-        }
-
-        const result = await this.tronWeb.fullNode.request<Omit<BroadcastReturn<T>, 'transaction'>>(
-            'wallet/broadcasttransaction',
-            signedTransaction,
-            'post'
-        );
-        return {
-            ...result,
-            transaction: signedTransaction,
-        };
+        return trxActions.sendRawTransaction(this.tronWeb.fullNode, signedTransaction);
     }
 
     async sendHexTransaction(signedHexTransaction: string) {
-        if (!utils.isHex(signedHexTransaction)) {
-            throw new Error('Invalid hex transaction provided');
-        }
-
-        const params = {
-            transaction: signedHexTransaction,
-        };
-
-        const result = await this.tronWeb.fullNode.request<BroadcastHexReturn>('wallet/broadcasthex', params, 'post');
-        if (result.result) {
-            return {
-                ...result,
-                transaction: JSON.parse(result.transaction) as Transaction,
-                hexTransaction: signedHexTransaction,
-            };
-        }
-        return result;
+        return trxActions.sendHexTransaction(this.tronWeb.fullNode, signedHexTransaction);
     }
 
     async sendTransaction(to: string, amount: number, options: AddressOptions = {}): Promise<BroadcastReturn<SignedTransaction>> {
@@ -871,7 +778,7 @@ export class Trx {
         }
 
         const address = options.privateKey ? this.tronWeb.address.fromPrivateKey(options.privateKey) : options.address;
-        const transaction = await this.tronWeb.transactionBuilder.sendTrx(to, amount, address as Address);
+        const transaction = await tbActions.sendTrx(this.tronWeb.fullNode, to, amount, address as string);
         const signedTransaction = await this.sign(transaction, options.privateKey);
         const result = await this.sendRawTransaction(signedTransaction);
         return result;
@@ -910,7 +817,7 @@ export class Trx {
         }
 
         const address = options.privateKey ? this.tronWeb.address.fromPrivateKey(options.privateKey) : options.address;
-        const transaction = await this.tronWeb.transactionBuilder.sendToken(to, amount, tokenID, address as Address);
+        const transaction = await tbActions.sendToken(this.tronWeb.fullNode, to, amount, tokenID, address as string);
         const signedTransaction = await this.sign(transaction, options.privateKey);
         const result = await this.sendRawTransaction(signedTransaction);
         return result;
@@ -958,11 +865,12 @@ export class Trx {
         }
 
         const address = options.privateKey ? this.tronWeb.address.fromPrivateKey(options.privateKey) : options.address;
-        const freezeBalance = await this.tronWeb.transactionBuilder.freezeBalance(
+        const freezeBalance = await tbActions.freezeBalance(
+            this.tronWeb.fullNode,
             amount,
             duration,
             resource,
-            address as Address,
+            address as string,
             receiverAddress
         );
         const signedTransaction = await this.sign(freezeBalance, options.privateKey);
@@ -999,9 +907,10 @@ export class Trx {
         }
 
         const address = options.privateKey ? this.tronWeb.address.fromPrivateKey(options.privateKey) : options.address;
-        const unfreezeBalance = await this.tronWeb.transactionBuilder.unfreezeBalance(
+        const unfreezeBalance = await tbActions.unfreezeBalance(
+            this.tronWeb.fullNode,
             resource,
-            address as Address,
+            address as string,
             receiverAddress
         );
         const signedTransaction = await this.sign(unfreezeBalance, options.privateKey);
@@ -1034,7 +943,7 @@ export class Trx {
         if (!options.privateKey && !options.address) throw Error('Function requires either a private key or address to be set');
 
         const address = options.privateKey ? this.tronWeb.address.fromPrivateKey(options.privateKey) : options.address;
-        const updateAccount = await this.tronWeb.transactionBuilder.updateAccount(accountName, address as Address);
+        const updateAccount = await tbActions.updateAccount(this.tronWeb.fullNode, accountName, address as string);
         const signedTransaction = await this.sign(updateAccount, options.privateKey);
         const result = await this.sendRawTransaction(signedTransaction);
         return result;
@@ -1514,22 +1423,7 @@ export class Trx {
     }
 
     async getCurrentRefBlockParams(): Promise<BlockHeaderRef> {
-        try {
-            const { block_header, blockID } = await this.tronWeb.fullNode.request<BlockWithoutDetail>(
-                'wallet/getblock',
-                { detail: false },
-                'post'
-            );
-            const { number, timestamp } = block_header.raw_data;
-            return {
-                ref_block_bytes: number.toString(16).slice(-4).padStart(4, '0'),
-                ref_block_hash: blockID.slice(16, 32),
-                expiration: timestamp + 60 * 1000,
-                timestamp,
-            };
-        } catch (e) {
-            throw new Error(`Unable to get params: ${(e as Error).message || e}`);
-        }
+        return trxActions.getCurrentRefBlockParams(this.tronWeb.fullNode);
     }
 
     async getNowWitnessList(
