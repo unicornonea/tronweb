@@ -81,7 +81,7 @@ export function deepCopyJson<T = unknown>(json: object): T {
 export function genContractAddress(ownerAddress: string, txID: string) {
     return (
         '41' +
-        keccak256(Buffer.from(txID + ownerAddress, 'hex'))
+        keccak256('0x' + txID + ownerAddress)
             .toString()
             .substring(2)
             .slice(24)
@@ -753,7 +753,7 @@ async function triggerSmartContractLocalInternal(
     );
 
     if (args.function_selector) {
-        args.data = keccak256(Buffer.from(args.function_selector, 'utf-8')).toString().substring(2, 10) + args.parameter;
+        args.data = keccak256(new TextEncoder().encode(args.function_selector)).toString().substring(2, 10) + args.parameter;
     }
     const value: TriggerSmartContract = {
         data: args.data,

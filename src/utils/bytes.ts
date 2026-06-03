@@ -1,4 +1,5 @@
 import { Base64 } from './base64.js';
+import { isHex, isString } from './validations.js';
 import { BytesLike } from '../types/UtilsTypes.js';
 
 export function byte2hexStr(byte: number) {
@@ -65,4 +66,29 @@ export function base64EncodeToString(bytes: BytesLike) {
     const string64 = b.encodeIgnoreUtf8(bytes);
 
     return string64;
+}
+
+export function hexToBytes(hex: string) {
+    if (!isHex(hex)) {
+        throw new Error('Invalid hex string')
+    }
+    hex = hex.replace(/^0x/, '');
+    return Uint8Array.from(hex.match(/../g) ?? [], b => parseInt(b, 16));
+}
+
+export function toUtf8(hex: string) {
+    if (isHex(hex)) {
+        hex = hex.replace(/^0x/, '');
+        // ignoreBOM keeps a leading U+FEFF as-is, matching Buffer.toString('utf8').
+        return new TextDecoder('utf-8', { ignoreBOM: true }).decode(hexToBytes(hex));
+    } else {
+        throw new Error('The passed value is not a valid hex string');
+    }
+}
+
+export function fromUtf8(string: string) {
+    if (!isString(string)) {
+        throw new Error('The passed value is not a valid utf-8 string');
+    }
+    return '0x' + byteArray2hexStr(new TextEncoder().encode(string)).toLowerCase();
 }

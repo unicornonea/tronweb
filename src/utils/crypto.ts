@@ -1,7 +1,7 @@
 import { ADDRESS_PREFIX, ADDRESS_PREFIX_BYTE, ADDRESS_SIZE } from './constants.js';
 import { base64EncodeToString, base64DecodeFromString, hexStr2byteArray } from './code.js';
 import { encode58, decode58 } from './base58.js';
-import { byte2hexStr, byteArray2hexStr } from './bytes.js';
+import { byte2hexStr, byteArray2hexStr, hexToBytes } from './bytes.js';
 import { keccak256, sha256, recoverAddress, arrayify, Signature } from './ethersUtils.js';
 import { secp256k1 as secp } from 'ethereum-cryptography/secp256k1';
 import { SignedTransaction } from '../types/Transaction.js';
@@ -9,7 +9,7 @@ import { SignedTransaction } from '../types/Transaction.js';
 import type { BytesLike } from '../types/UtilsTypes.js';
 
 function normalizePrivateKeyBytes(priKeyBytes: BytesLike) {
-    return hexStr2byteArray(byteArray2hexStr(priKeyBytes).padStart(64, '0'));
+    return byteArray2hexStr(priKeyBytes).padStart(64, '0');
 }
 
 export function getBase58CheckAddress(addressBytes: number[]) {
@@ -198,7 +198,7 @@ export function getAddressFromPriKeyBase64String(priKeyBase64String: string) {
 }
 
 export function getPubKeyFromPriKey(priKeyBytes: BytesLike) {
-    const pubkey = secp.ProjectivePoint.fromPrivateKey(new Uint8Array(normalizePrivateKeyBytes(priKeyBytes)));
+    const pubkey = secp.ProjectivePoint.fromPrivateKey(hexToBytes(normalizePrivateKeyBytes(priKeyBytes)));
     const x = pubkey.x;
     const y = pubkey.y;
 
@@ -242,5 +242,5 @@ export function pkToAddress(privateKey: string, strict = false) {
 }
 
 export function sha3(string: string, prefix = true) {
-    return (prefix ? '0x' : '') + keccak256(Buffer.from(string, 'utf-8')).toString().substring(2);
+    return (prefix ? '0x' : '') + keccak256(new TextEncoder().encode(string)).toString().substring(2);
 }

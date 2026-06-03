@@ -290,7 +290,7 @@ export class TronWeb extends EventEmitter {
 
     sha3: typeof TronWeb.sha3;
     static sha3(string: string, prefix = true) {
-        return (prefix ? '0x' : '') + keccak256(Buffer.from(string, 'utf-8')).toString().substring(2);
+        return (prefix ? '0x' : '') + keccak256(new TextEncoder().encode(string)).toString().substring(2);
     }
 
     toHex: typeof TronWeb.toHex;
@@ -319,20 +319,12 @@ export class TronWeb extends EventEmitter {
 
     toUtf8: typeof TronWeb.toUtf8;
     static toUtf8(hex: string) {
-        if (utils.isHex(hex)) {
-            hex = hex.replace(/^0x/, '');
-            return Buffer.from(hex, 'hex').toString('utf8');
-        } else {
-            throw new Error('The passed value is not a valid hex string');
-        }
+        return utils.bytes.toUtf8(hex);
     }
 
     fromUtf8: typeof TronWeb.fromUtf8;
     static fromUtf8(string: string) {
-        if (!utils.isString(string)) {
-            throw new Error('The passed value is not a valid utf-8 string');
-        }
-        return '0x' + Buffer.from(string, 'utf8').toString('hex');
+        return utils.bytes.fromUtf8(string);
     }
 
     toAscii: typeof TronWeb.toAscii;
@@ -359,7 +351,12 @@ export class TronWeb extends EventEmitter {
         if (!utils.isString(string)) {
             throw new Error('The passed value is not a valid utf-8 string');
         }
-        return '0x' + Buffer.from(string, 'ascii').toString('hex').padEnd(padding!, '0');
+        let hex = '';
+        for (let i = 0; i < string.length; i++) {
+            // 'ascii'/'latin1' encoding == low byte of each UTF-16 code unit.
+            hex += (string.charCodeAt(i) & 0xff).toString(16).padStart(2, '0');
+        }
+        return '0x' + hex.padEnd(padding!, '0');
     }
 
     toDecimal: typeof TronWeb.toDecimal;

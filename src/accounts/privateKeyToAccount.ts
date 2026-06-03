@@ -18,6 +18,7 @@ import { signMessage as cryptoSignMessage } from '../utils/message.js';
 import { signTypedData as cryptoSignTypedData } from '../utils/typedData.js';
 import { txCheck } from '../utils/transaction.js';
 import { hexStr2byteArray, byteArray2hexStr } from '../utils/code.js';
+import { hexToBytes } from '../utils/bytes.js';
 
 function normalizePrivateKey(privateKey: string): Hex {
     if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey)) {
@@ -38,7 +39,7 @@ function normalizeRawMessage(raw: Hex | Uint8Array): Uint8Array {
         throw new Error('Invalid raw message: hex string must have an even number of digits');
     }
 
-    return new Uint8Array(hexStr2byteArray(raw.slice(2)));
+    return hexToBytes(raw.slice(2));
 }
 
 function resolveMessageInput(message: SignableMessage): string | Uint8Array {
