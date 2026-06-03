@@ -119,6 +119,15 @@ describe('action layer', function () {
             );
         });
 
+        it('sendRawTransaction action rejects an empty signature array', async function () {
+            const fullNode = new HttpProvider(FULL_NODE_API);
+            const tx = await tbActions.sendTrx(fullNode, accounts.hex[1], 1, accounts.hex[0]);
+            await assertThrow(
+                trxActions.sendRawTransaction(fullNode, { ...tx, signature: [] } as any),
+                'Transaction is not signed'
+            );
+        });
+
         it('getAccount / getBalance action accept bare solidityNode primitive', async function () {
             const solidityNode = new HttpProvider(FULL_NODE_API);
             const account = await trxActions.getAccount(solidityNode, accounts.hex[0]);

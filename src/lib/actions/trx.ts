@@ -32,7 +32,11 @@ export async function sendRawTransaction<T extends SignedTransaction>(
         throw new Error('Invalid transaction provided');
     }
 
-    if (!signedTransaction.signature || !isArray(signedTransaction.signature)) {
+    if (
+        !signedTransaction.signature ||
+        !isArray(signedTransaction.signature) ||
+        signedTransaction.signature.length === 0
+    ) {
         throw new Error('Transaction is not signed');
     }
 
