@@ -830,7 +830,7 @@ export async function createSmartContract(
     options: CreateSmartContractOptions,
     issuerAddress: string
 ): Promise<CreateSmartContractTransaction> {
-    const feeLimit = options.feeLimit!;
+    const feeLimit = options.feeLimit;
     let userFeePercentage = options.userFeePercentage;
     if (typeof userFeePercentage !== 'number' && !userFeePercentage) {
         userFeePercentage = 100;
@@ -934,7 +934,7 @@ export async function createSmartContract(
 
     const args: any = {
         owner_address: toHex(issuerAddress),
-        fee_limit: parseInt(feeLimit),
+        fee_limit: parseInt(feeLimit as number),
         call_value: parseInt(callValue),
         consume_user_resource_percent: userFeePercentage,
         origin_energy_limit: originEnergyLimit,

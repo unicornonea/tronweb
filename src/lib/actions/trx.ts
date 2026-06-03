@@ -68,7 +68,7 @@ export async function getBlockByNumber(fullNode: HttpProvider, blockID: number):
         throw new Error('Invalid block number provided');
     }
 
-    const block = await fullNode.request<Block>('wallet/getblockbynum', { num: parseInt(blockID as unknown as string) }, 'post');
+    const block = await fullNode.request<Block>('wallet/getblockbynum', { num: parseInt(blockID) }, 'post');
     if (!Object.keys(block).length) {
         throw new Error('Block not found');
     }
