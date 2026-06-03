@@ -77,6 +77,25 @@ describe('getContract', function () {
         assert.strictEqual(createContract, getContract);
     });
 
+    it('rejects contract calls with the wrong number of arguments', function () {
+        const publicClient = createPublicClient({ fullHost });
+        const contract = getContract({ client: publicClient, abi: contractAbi, address: contractAddress });
+
+        // balanceOf takes exactly one argument
+        assert.throws(
+            () => (contract as any).balanceOf(account.address, account.address),
+            'Contract function "balanceOf" expects 1 argument(s) but received 2.'
+        );
+        assert.throws(
+            () => (contract as any).balanceOf(),
+            'Contract function "balanceOf" expects 1 argument(s) but received 0.'
+        );
+        assert.throws(
+            () => (contract as any).read.balanceOf([account.address, account.address]),
+            'Contract function "balanceOf" expects 1 argument(s) but received 2.'
+        );
+    });
+
     it('adds metadata and contract namespaces for public clients', async function () {
         const publicClient = createPublicClient({ fullHost });
         const eventResponse = {

@@ -253,11 +253,23 @@ export function getContract<Abi extends ContractAbiInterface, TClient extends Co
     const getEvents: Record<string, unknown> = Object.create(null);
     const write: Record<string, unknown> = Object.create(null);
 
+    const assertArgCount = (functionName: string, args: readonly unknown[] | undefined): void => {
+        const fragment = abi.find(
+            (item): item is FunctionFragment => item.type === 'function' && 'name' in item && item.name === functionName
+        );
+        const expected = fragment?.inputs?.length ?? 0;
+        const actual = Array.isArray(args) ? args.length : 0;
+        if (actual !== expected) {
+            throw new Error(`Contract function "${functionName}" expects ${expected} argument(s) but received ${actual}.`);
+        }
+    };
+
     const invokeRead = <FunctionName extends ReadFunctionName<Abi>>(
         functionName: FunctionName,
         args: ReadContractParameters<Abi, FunctionName>['args'],
         options?: ReadOptions<Abi, FunctionName>
     ) => {
+        assertArgCount(functionName, args as readonly unknown[] | undefined);
         return client.readContract({
             address,
             abi,
@@ -278,6 +290,7 @@ export function getContract<Abi extends ContractAbiInterface, TClient extends Co
             );
         }
 
+        assertArgCount(functionName, args as readonly unknown[] | undefined);
         return client.writeContract({
             address,
             abi,
@@ -292,6 +305,7 @@ export function getContract<Abi extends ContractAbiInterface, TClient extends Co
         args: EstimateContractGasParameters<Abi, FunctionName>['args'],
         options?: EstimateGasOptions<Abi, FunctionName>
     ) => {
+        assertArgCount(functionName, args as readonly unknown[] | undefined);
         return client.estimateContractGas({
             address,
             abi,
