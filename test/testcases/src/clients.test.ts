@@ -17,6 +17,9 @@ import {
     defineChain,
     getContract as getContractFromRoot,
     http,
+    mainnet as mainnetFromRoot,
+    nile as nileFromRoot,
+    shasta as shastaFromRoot,
 } from '../../../src/index.js';
 
 interface MockProvider {
@@ -128,6 +131,9 @@ describe('client factories', function () {
         assert.strictEqual(createWalletClientFromRoot, createWalletClient);
         assert.strictEqual(getContractFromRoot, getContract);
         assert.strictEqual(createContractFromRoot, getContractFromRoot);
+        assert.strictEqual(mainnetFromRoot, mainnet);
+        assert.strictEqual(nileFromRoot, nile);
+        assert.strictEqual(shastaFromRoot, shasta);
         assert.isFunction(defineChain);
         assert.isFunction(http);
     });

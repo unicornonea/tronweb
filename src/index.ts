@@ -28,8 +28,8 @@ export { TronWeb };
 import { privateKeyToAccount } from './accounts/index.js';
 export { privateKeyToAccount };
 
-import { defineChain } from './chains/index.js';
-export { defineChain };
+import { defineChain, mainnet, nile, shasta } from './chains/index.js';
+export { defineChain, mainnet, nile, shasta };
 
 import { http } from './transports/index.js';
 export { http };
@@ -65,6 +65,9 @@ export default {
     TronWeb,
     privateKeyToAccount,
     defineChain,
+    mainnet,
+    nile,
+    shasta,
     http,
     createPublicClient,
     createWalletClient,
