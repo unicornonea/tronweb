@@ -6,6 +6,7 @@ import type {
     SignTypedDataParameters,
 } from './types.js';
 import type { SignedTransaction, Transaction } from '../types/Transaction.js';
+import type { ContractParamter } from '../types/Contract.js';
 import {
     getPubKeyFromPriKey,
     getAddressFromPriKey,
@@ -32,7 +33,12 @@ function normalizeRawMessage(raw: Hex | Uint8Array): Uint8Array {
         throw new Error('Invalid raw message: must be a 0x-prefixed hex string or Uint8Array');
     }
 
-    return new Uint8Array(hexStr2byteArray(raw.slice(2), true));
+    // raw.length includes the even-length '0x' prefix, so its parity matches the hex digit count.
+    if (raw.length % 2 !== 0) {
+        throw new Error('Invalid raw message: hex string must have an even number of digits');
+    }
+
+    return new Uint8Array(hexStr2byteArray(raw.slice(2)));
 }
 
 function resolveMessageInput(message: SignableMessage): string | Uint8Array {
@@ -94,9 +100,9 @@ export function privateKeyToAccount(privateKey: Hex): PrivateKeyAccount {
         async signMessage({ message }: SignMessageParameters): Promise<Hex> {
             return cryptoSignMessage(resolveMessageInput(message), normalizedPrivateKey) as Hex;
         },
-        async signTransaction(transaction: Transaction): Promise<SignedTransaction> {
+        async signTransaction<T extends ContractParamter>(transaction: Transaction<T>): Promise<SignedTransaction<T>> {
             assertSignableTx(transaction, addressHex);
-            return cryptoSignTransaction(normalizedPrivateKey.slice(2), transaction);
+            return cryptoSignTransaction(normalizedPrivateKey.slice(2), transaction) as SignedTransaction<T>;
         },
         async signTypedData({ domain = {}, types, message }: SignTypedDataParameters): Promise<Hex> {
             return cryptoSignTypedData(domain, types as any, message, normalizedPrivateKey) as Hex;

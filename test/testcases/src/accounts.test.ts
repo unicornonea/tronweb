@@ -169,6 +169,13 @@ describe('privateKeyToAccount', function () {
         assert.equal(rawHexSignature, rawBytesSignature);
     });
 
+    it('rejects an odd-length hex raw message instead of silently padding it', async function () {
+        await assertRejectsWithMessage(
+            () => account.signMessage({ message: { raw: '0xabc' as `0x${string}` } }),
+            'Invalid raw message: hex string must have an even number of digits'
+        );
+    });
+
     it('does not expose a raw sign({ hash }) primitive', function () {
         assert.isUndefined((account as any).sign);
     });

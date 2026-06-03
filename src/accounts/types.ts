@@ -1,3 +1,4 @@
+import { ContractParamter } from '../types/Contract.js';
 import type { SignedTransaction, Transaction } from '../types/Transaction.js';
 import type { TypedDataDomain, TypedDataField } from '../utils/typedData.js';
 
@@ -48,7 +49,7 @@ export interface Account {
      * @param transaction - unsigned Transaction object
      * @returns SignedTransaction with signature array populated
      */
-    signTransaction(transaction: Transaction): SignedTransaction;
+    signTransaction<T extends ContractParamter>(transaction: Transaction<T>): SignedTransaction<T>;
 
     /**
      * Sign EIP-712 typed data.
@@ -62,7 +63,7 @@ export interface Account {
  */
 export type PrivateKeyAccount = Omit<Account, 'signMessage' | 'signTransaction' | 'signTypedData'> & {
     signMessage(params: SignMessageParameters): Promise<Hex>;
-    signTransaction(transaction: Transaction): Promise<SignedTransaction>;
+    signTransaction<T extends ContractParamter>(transaction: Transaction<T>): Promise<SignedTransaction<T>>;
     signTypedData(params: SignTypedDataParameters): Promise<Hex>;
 };
 
