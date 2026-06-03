@@ -24,9 +24,8 @@ import type { EventResponse } from '../types/Event.js';
 import type { Hex, SignableMessage } from '../accounts/types.js';
 import type { TransactionWrapper } from '../types/Transaction.js';
 import type { HttpProvider } from '../lib/providers/index.js';
-import { TronWeb } from '../tronweb.js';
 import { decodeParamsV2ByABI } from '../utils/abi.js';
-import { hexToBytes } from '../utils/bytes.js';
+import { hexToBytes, toUtf8 } from '../utils/bytes.js';
 import { toHex } from '../utils/address.js';
 import { verifyMessage as recoverMessageAddress } from '../utils/message.js';
 import { verifyTypedData as recoverTypedDataAddress } from '../utils/typedData.js';
@@ -120,7 +119,7 @@ function extractConstantResultData(transaction: TransactionWrapper): Hex | undef
         if (chunk.length > 0) {
             let decoded = '';
             for (let index = 0; index < chunk.length; index += 64) {
-                decoded += TronWeb.toUtf8(chunk.substring(index, index + 64));
+                decoded += toUtf8(chunk.substring(index, index + 64));
             }
             message += ` Error message: ${decoded
                 .replace(/(\u0000|\u000b|\f)+/g, ' ')
