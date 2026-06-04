@@ -4,6 +4,7 @@ import type {
     DeployContractParameters,
     SendRawTransactionParameters,
     SendTransactionParams,
+    SendTransactionReturn,
     SendTransactionType,
     SignTransactionParameters,
     WalletClient,
@@ -13,7 +14,6 @@ import type {
 import type { WalletAccount } from '../accounts/types.js';
 import type { ContractAbiInterface, FunctionFragment } from '../types/ABI.js';
 import type { SignedTransaction, Transaction } from '../types/Transaction.js';
-import type { BroadcastReturn } from '../types/Trx.js';
 import { toHex } from '../utils/address.js';
 import { createClientQueryActions } from './createClientQueryActions.js';
 import { createClientMetadata } from './createClientMetadata.js';
@@ -31,6 +31,16 @@ const SEND_TRANSACTION_NEEDS_SOLIDITY: ReadonlySet<SendTransactionType> = new Se
 ]);
 
 const SEND_TRANSACTION_NEEDS_CACHE: ReadonlySet<SendTransactionType> = new Set(['clearABI']);
+
+// Constant/read-only actions: they query the node and return a result instead of a
+// broadcastable transaction, so sendTransaction returns that result directly without
+// signing or broadcasting.
+const SEND_TRANSACTION_CONSTANT: ReadonlySet<SendTransactionType> = new Set([
+    'triggerConstantContract',
+    'triggerConfirmedConstantContract',
+    'estimateEnergy',
+    'deployConstantContract',
+]);
 
 const SEND_TRANSACTION_ALLOWED: ReadonlySet<SendTransactionType> = new Set([
     'sendTrx',
@@ -205,9 +215,15 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
 
     const sendTransaction = async <K extends SendTransactionType>(
         params: SendTransactionParams<K>
-    ): Promise<BroadcastReturn<SignedTransaction>> => {
+    ): Promise<SendTransactionReturn<K>> => {
         const { type, parameters } = params;
         const result = (await dispatchSendTransaction(type, parameters as readonly unknown[])) as any;
+
+        // Constant/read-only actions don't yield a broadcastable transaction — return
+        // the node's query result as-is, skipping signing and broadcasting.
+        if (SEND_TRANSACTION_CONSTANT.has(type)) {
+            return result as SendTransactionReturn<K>;
+        }
 
         // triggerSmartContract returns { result, transaction }; pure builders return Transaction directly.
         const transaction = result?.transaction ?? result;
@@ -220,7 +236,7 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
 
         const broadcast = await trxActions.sendRawTransaction(fullNode, signed);
         assertBroadcastOk(broadcast);
-        return broadcast;
+        return broadcast as SendTransactionReturn<K>;
     };
 
     const getAddresses = async () => [account.address] as const;

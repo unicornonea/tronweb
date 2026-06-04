@@ -856,6 +856,52 @@ describe('client factories', function () {
         );
     });
 
+    it('returns the action result directly for constant/read-only sendTransaction types', async function () {
+        let signCalled = false;
+        const stubAccount = {
+            ...account,
+            async signTransaction(transaction: any) {
+                signCalled = true;
+                return { ...transaction, signature: ['0xsignature'] };
+            },
+        };
+        const fullNode = makeMockProvider('fullNode');
+        const solidityNode = makeMockProvider('solidityNode');
+        const constantResult = {
+            result: { result: true },
+            energy_used: 1234,
+            constant_result: ['0x000000000000000000000000000000000000000000000000000000000000002a'],
+            transaction: { ret: [{}], txID: 'deadbeef' },
+        };
+        fullNode.mock('wallet/triggerconstantcontract', () => constantResult);
+        // No broadcast mock on purpose: if sendTransaction tried to sign + broadcast a
+        // constant call, the mock provider would throw "unmocked request to
+        // wallet/broadcasttransaction".
+        const walletClient = createWalletClient({
+            account: stubAccount,
+            fullNode: fullNode.provider,
+            solidityNode: solidityNode.provider,
+        });
+
+        const result = await walletClient.sendTransaction({
+            type: 'triggerConstantContract',
+            parameters: [
+                contractAddress,
+                'balanceOf(address)',
+                { funcABIV2: testReadContractAbi[0], parametersV2: [account.address] },
+                [],
+                account.address,
+            ],
+        } as any);
+
+        assert.deepEqual(result as unknown, constantResult, 'returns the node result unchanged');
+        assert.isFalse(signCalled, 'constant calls must not be signed');
+        assert.isUndefined(
+            fullNode.calls.find((c) => c.url === 'wallet/broadcasttransaction'),
+            'constant calls must not be broadcast'
+        );
+    });
+
     it('validates chain id and block transaction count inputs', async function () {
         const fullNode = makeMockProvider('fullNode');
         const solidityNode = makeMockProvider('solidityNode');

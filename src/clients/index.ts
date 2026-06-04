@@ -1,4 +1,12 @@
-export type { PublicClientConfig, WalletClientConfig, PublicClient, WalletClient, SendTransactionParams } from './types.js';
+export type {
+    PublicClientConfig,
+    WalletClientConfig,
+    PublicClient,
+    WalletClient,
+    SendTransactionParams,
+    SendTransactionReturn,
+    SendTransactionConstantType,
+} from './types.js';
 export { createPublicClient } from './createPublicClient.js';
 export { createWalletClient } from './createWalletClient.js';
 export { getContract, createContract } from './getContract.js';
