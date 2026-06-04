@@ -18,7 +18,7 @@ import { toHex } from '../utils/address.js';
 import { createClientQueryActions } from './createClientQueryActions.js';
 import { createClientMetadata } from './createClientMetadata.js';
 import { resolveClientProviders } from './resolveClientConfig.js';
-import { buildFullTypeDefinition } from '../utils/abi.js';
+import { buildFunctionSelector } from '../utils/abi.js';
 import * as tbActions from '../lib/actions/transactionBuilder.js';
 import * as trxActions from '../lib/actions/trx.js';
 
@@ -80,11 +80,6 @@ const SEND_TRANSACTION_ALLOWED: ReadonlySet<SendTransactionType> = new Set([
 function isReadOnlyFunctionFragment(fragment: FunctionFragment): boolean {
     const stateMutability = (fragment.stateMutability ?? '').toLowerCase();
     return stateMutability === 'view' || stateMutability === 'pure' || fragment.constant === true;
-}
-
-function buildFunctionSelector(fragment: FunctionFragment): string {
-    const inputs = fragment.inputs ?? [];
-    return `${fragment.name}(${inputs.map((input) => buildFullTypeDefinition(input)).join(',')})`;
 }
 
 function getWriteContractFragment<

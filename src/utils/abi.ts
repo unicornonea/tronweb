@@ -75,6 +75,11 @@ export function buildFullTypeDefinition(typeDef: AbiParamsCommon): string {
     return typeDef.type;
 }
 
+export function buildFunctionSelector(fragment: FunctionFragment): string {
+    const inputs = fragment.inputs ?? [];
+    return `${fragment.name}(${inputs.map((input) => buildFullTypeDefinition(input)).join(',')})`;
+}
+
 export function encodeParamsV2ByABI(funABI: FunctionFragment, args: any[]) {
     const types: string[] = [];
 
