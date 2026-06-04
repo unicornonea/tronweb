@@ -181,15 +181,15 @@ describe('TronWeb.utils.abi', function () {
             assert.equal(buildFullTypeDefinition({ name: 'd', type: 'uint256[]' }), 'uint256[]');
         });
 
-        it('rewrites the trcToken type to uint256', function () {
-            assert.equal(buildFullTypeDefinition({ name: 'tokenId', type: 'trcToken' }), 'uint256');
+        it('keeps the trcToken type unchanged', function () {
+            assert.equal(buildFullTypeDefinition({ name: 'tokenId', type: 'trcToken' }), 'trcToken');
         });
 
-        it('rewrites trcToken arrays to uint256 arrays', function () {
-            assert.equal(buildFullTypeDefinition({ name: 'tokenIds', type: 'trcToken[]' }), 'uint256[]');
+        it('keeps trcToken arrays unchanged', function () {
+            assert.equal(buildFullTypeDefinition({ name: 'tokenIds', type: 'trcToken[]' }), 'trcToken[]');
         });
 
-        it('rewrites a trcToken nested inside a tuple', function () {
+        it('keeps a trcToken nested inside a tuple', function () {
             assert.equal(
                 buildFullTypeDefinition({
                     name: 'payload',
@@ -199,7 +199,7 @@ describe('TronWeb.utils.abi', function () {
                         { name: 'amount', type: 'uint256' },
                     ],
                 }),
-                '(uint256,uint256)'
+                '(trcToken,uint256)'
             );
         });
 
@@ -263,7 +263,7 @@ describe('TronWeb.utils.abi', function () {
                         { name: 'amount', type: 'uint256' },
                     ],
                 }),
-                'transferToken(address,uint256,uint256)'
+                'transferToken(address,trcToken,uint256)'
             );
         });
 
@@ -299,7 +299,7 @@ describe('TronWeb.utils.abi', function () {
                         },
                     ],
                 }),
-                'inspect((address,uint256,(address,bool)),(address,uint256)[])'
+                'inspect((address,trcToken,(address,bool)),(address,uint256)[])'
             );
         });
     });
