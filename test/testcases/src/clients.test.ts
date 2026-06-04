@@ -310,6 +310,27 @@ describe('client factories', function () {
         );
     });
 
+    it('getBalance/getAccount default to the wallet address (audit #8)', async function () {
+        this.timeout(60000);
+
+        // The wallet client plumbs defaultAddress = deployer.address, so a no-arg call
+        // resolves to it — matching legacy trx.getBalance(address = tronWeb.defaultAddress.hex).
+        const walletClient = createWalletClient({ account: deployer, fullHost: FULL_NODE_API });
+        const publicClient = createPublicClient({ fullHost: FULL_NODE_API });
+
+        assert.equal(await walletClient.getBalance(), await walletClient.getBalance(deployer.address));
+        assert.isObject(await walletClient.getAccount());
+
+        // A public client has no default address, so a no-arg call must still require one.
+        let threw = false;
+        try {
+            await publicClient.getBalance();
+        } catch {
+            threw = true;
+        }
+        assert.isTrue(threw, 'public getBalance() with no default address should throw');
+    });
+
     it('createWalletClient exposes the expected method surface', function () {
         const walletClient = createWalletClient({ account, chain: nile, transport: http() });
 
