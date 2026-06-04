@@ -24,7 +24,7 @@ import type { EventResponse } from '../types/Event.js';
 import type { Hex, SignableMessage } from '../accounts/types.js';
 import type { TransactionWrapper } from '../types/Transaction.js';
 import type { HttpProvider } from '../lib/providers/index.js';
-import { buildFunctionSelector, decodeParamsV2ByABI } from '../utils/abi.js';
+import { buildFunctionSelector, decodeParamsV2ByABI, resolveFunctionFragment } from '../utils/abi.js';
 import { hexToBytes, toUtf8 } from '../utils/bytes.js';
 import { toHex } from '../utils/address.js';
 import { verifyMessage as recoverMessageAddress } from '../utils/message.js';
@@ -131,14 +131,8 @@ function extractConstantResultData(transaction: TransactionWrapper): Hex | undef
 function getReadContractFragment<
     Abi extends ContractAbiInterface,
     FunctionName extends ReadContractParameters<Abi>['functionName'],
->(abi: Abi, functionName: FunctionName): FunctionFragment {
-    const fragment = abi.find(
-        (item): item is FunctionFragment => item.type === 'function' && 'name' in item && item.name === functionName
-    );
-
-    if (!fragment) {
-        throw new Error(`ABI fragment not found for function "${String(functionName)}".`);
-    }
+>(abi: Abi, functionName: FunctionName, args: readonly unknown[] | undefined): FunctionFragment {
+    const fragment = resolveFunctionFragment(abi, functionName as string, args);
 
     if (!isReadOnlyFunctionFragment(fragment)) {
         throw new Error(`Function "${String(functionName)}" is not read-only.`);
@@ -150,14 +144,8 @@ function getReadContractFragment<
 function getEstimateContractGasFragment<
     Abi extends ContractAbiInterface,
     FunctionName extends EstimateContractGasParameters<Abi>['functionName'],
->(abi: Abi, functionName: FunctionName): FunctionFragment {
-    const fragment = abi.find(
-        (item): item is FunctionFragment => item.type === 'function' && 'name' in item && item.name === functionName
-    );
-
-    if (!fragment) {
-        throw new Error(`ABI fragment not found for function "${String(functionName)}".`);
-    }
+>(abi: Abi, functionName: FunctionName, args: readonly unknown[] | undefined): FunctionFragment {
+    const fragment = resolveFunctionFragment(abi, functionName as string, args);
 
     if (!isWriteFunctionFragment(fragment)) {
         throw new Error(`Function "${String(functionName)}" is read-only.`);
@@ -397,7 +385,7 @@ export function createClientQueryActions({
             functionName,
             value,
         }: EstimateContractGasParameters<Abi, FunctionName>): Promise<EstimateContractGasReturnType> => {
-            const fragment = getEstimateContractGasFragment(abi, functionName);
+            const fragment = getEstimateContractGasFragment(abi, functionName, args);
             const estimate = await tbActions.estimateEnergy(
                 fullNode,
                 solidityNode,
@@ -525,7 +513,7 @@ export function createClientQueryActions({
             functionName,
             value,
         }: ReadContractParameters<Abi, FunctionName>): Promise<ReadContractReturnType<Abi, FunctionName>> => {
-            const fragment = getReadContractFragment(abi, functionName);
+            const fragment = getReadContractFragment(abi, functionName, args);
             const transaction = await tbActions.triggerConstantContract(
                 fullNode,
                 solidityNode,

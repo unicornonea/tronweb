@@ -11,6 +11,7 @@ import type {
     WriteContractParameters,
     WriteContractReturnType,
 } from './types.js';
+import { overloadArities } from '../utils/abi.js';
 
 // ─── Helper types ────────────────────────────────────────────────────────────
 
@@ -254,12 +255,13 @@ export function getContract<Abi extends ContractAbiInterface, TClient extends Co
     const write: Record<string, unknown> = Object.create(null);
 
     const assertArgCount = (functionName: string, args: readonly unknown[] | undefined): void => {
-        const fragment = abi.find(
-            (item): item is FunctionFragment => item.type === 'function' && 'name' in item && item.name === functionName
-        );
-        const expected = fragment?.inputs?.length ?? 0;
+        // Overload-aware: accept the call if its arg count matches ANY overload's
+        // arity (the correct overload is then selected from the args downstream).
+        const arities = overloadArities(abi, functionName);
+        if (arities.length === 0) return;
         const actual = Array.isArray(args) ? args.length : 0;
-        if (actual !== expected) {
+        if (!arities.includes(actual)) {
+            const expected = arities.join(' or ');
             throw new Error(`Contract function "${functionName}" expects ${expected} argument(s) but received ${actual}.`);
         }
     };

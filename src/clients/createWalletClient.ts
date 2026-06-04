@@ -18,7 +18,7 @@ import { toHex } from '../utils/address.js';
 import { createClientQueryActions } from './createClientQueryActions.js';
 import { createClientMetadata } from './createClientMetadata.js';
 import { resolveClientProviders } from './resolveClientConfig.js';
-import { buildFunctionSelector } from '../utils/abi.js';
+import { buildFunctionSelector, resolveFunctionFragment } from '../utils/abi.js';
 import * as tbActions from '../lib/actions/transactionBuilder.js';
 import * as trxActions from '../lib/actions/trx.js';
 
@@ -121,14 +121,8 @@ function isReadOnlyFunctionFragment(fragment: FunctionFragment): boolean {
 function getWriteContractFragment<
     Abi extends ContractAbiInterface,
     FunctionName extends WriteContractParameters<Abi>['functionName'],
->(abi: Abi, functionName: FunctionName): FunctionFragment {
-    const fragment = abi.find(
-        (item): item is FunctionFragment => item.type === 'function' && 'name' in item && item.name === functionName
-    );
-
-    if (!fragment) {
-        throw new Error(`ABI fragment not found for function "${String(functionName)}".`);
-    }
+>(abi: Abi, functionName: FunctionName, args: readonly unknown[] | undefined): FunctionFragment {
+    const fragment = resolveFunctionFragment(abi, functionName as string, args);
 
     if (isReadOnlyFunctionFragment(fragment)) {
         throw new Error(`Function "${String(functionName)}" is read-only.`);
@@ -261,7 +255,7 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
         permissionId,
     }: WriteContractParameters<Abi, FunctionName>) => {
         const signerAddress = resolveSignerAddress(account, accountOverride);
-        const fragment = getWriteContractFragment(abi, functionName);
+        const fragment = getWriteContractFragment(abi, functionName, args);
         const callValue = resolveCallValue(value);
         const txWrapper = await tbActions.triggerSmartContract(
             fullNode,

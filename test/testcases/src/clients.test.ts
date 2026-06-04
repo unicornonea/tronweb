@@ -21,6 +21,12 @@ import {
     nile as nileFromRoot,
     shasta as shastaFromRoot,
 } from '../../../src/index.js';
+import * as tbActions from '../../../src/lib/actions/transactionBuilder.js';
+import * as trxActions from '../../../src/lib/actions/trx.js';
+import tronWebBuilder from '../../helpers/tronWebBuilder.js';
+import wait from '../../helpers/wait.js';
+import liveConfig from '../../helpers/config.js';
+import { trcTokenOverloadAbi, trcTokenOverloadBytecode } from '../../fixtures/trcTokenOverload.js';
 
 interface MockProvider {
     readonly provider: HttpProvider;
@@ -737,6 +743,83 @@ describe('client factories', function () {
         assert.equal(explicit!.params.fee_limit, 7_777);
     });
 
+    it('resolves overloaded ABI functions by argument arity', async function () {
+        const overloadedAbi = [
+            {
+                type: 'function',
+                name: 'getValue',
+                stateMutability: 'view',
+                inputs: [{ name: 'id', type: 'uint256' }],
+                outputs: [{ name: 'v', type: 'uint256' }],
+            },
+            {
+                type: 'function',
+                name: 'getValue',
+                stateMutability: 'view',
+                inputs: [
+                    { name: 'id', type: 'uint256' },
+                    { name: 'owner', type: 'address' },
+                ],
+                outputs: [{ name: 'v', type: 'uint256' }],
+            },
+        ] as const;
+
+        const fullNode = makeMockProvider('fullNode');
+        const solidityNode = makeMockProvider('solidityNode');
+        fullNode.mock('wallet/triggerconstantcontract', () => ({
+            result: { result: true },
+            transaction: { txID: '0'.repeat(64) },
+            constant_result: [encodeParams(['uint256'], [42]).replace(/^0x/, '')],
+        }));
+        const publicClient = createPublicClient({
+            fullNode: fullNode.provider,
+            solidityNode: solidityNode.provider,
+        });
+
+        // Both overloads are reachable and each puts its OWN canonical selector on the wire.
+        assert.equal(
+            String(
+                await publicClient.readContract({
+                    address: contractAddress,
+                    abi: overloadedAbi,
+                    functionName: 'getValue',
+                    args: [5],
+                    account: account.address,
+                })
+            ),
+            '42'
+        );
+        assert.equal(
+            String(
+                await publicClient.readContract({
+                    address: contractAddress,
+                    abi: overloadedAbi,
+                    functionName: 'getValue',
+                    args: [5, account.address],
+                    account: account.address,
+                })
+            ),
+            '42'
+        );
+        const selectors = fullNode.calls
+            .filter((c) => c.url === 'wallet/triggerconstantcontract')
+            .map((c) => c.params.function_selector);
+        assert.include(selectors, 'getValue(uint256)');
+        // The second overload was previously unreachable (first-overload-only resolution).
+        assert.include(selectors, 'getValue(uint256,address)');
+
+        // getContract read namespace resolves overloads by arity as well.
+        const contract = getContract({ client: publicClient, abi: overloadedAbi, address: contractAddress });
+        assert.equal(String(await (contract as any).read.getValue([5])), '42');
+        assert.equal(String(await (contract as any).read.getValue([5, account.address])), '42');
+
+        // Arg-count validation is overload-aware (accepts any overload's arity, lists all).
+        await assertRejectsWithMessage(
+            () => (contract as any).read.getValue([1, 2, 3]),
+            'Contract function "getValue" expects 1 or 2 argument(s) but received 3.'
+        );
+    });
+
     it('throws when sendTransaction broadcast returns an error code', async function () {
         const stubAccount = {
             ...account,
@@ -1021,5 +1104,155 @@ describe('client factories', function () {
                 )
             );
         });
+    });
+});
+
+// Contract-interaction coverage that runs against a real local TRE node (port 9090)
+// instead of the mocked provider above: deploy a real contract, send real
+// transactions, and assert on-chain results.
+describe('client factories — live TRE @9090', function () {
+    this.timeout(180000);
+    const FULL_HOST = liveConfig.FULL_NODE_API;
+
+    let deployer: ReturnType<typeof privateKeyToAccount>;
+    // Typed as `any`: the calls below pass `abi as any`, so the precise generic
+    // contract typing would otherwise resolve functionName/args to `never`.
+    let livePublicClient: any;
+    let liveWalletClient: any;
+    let deployedAddress: string;
+
+    async function waitForReceipt(txId: string): Promise<any> {
+        for (let i = 0; i < 20; i++) {
+            const info: any = await livePublicClient.getTransactionInfo({ txId }).catch(() => ({}));
+            if (info && Object.keys(info).length) return info;
+            await wait(3);
+        }
+        throw new Error(`transaction not confirmed on chain: ${txId}`);
+    }
+
+    async function readStored(): Promise<string> {
+        return String(
+            await livePublicClient.readContract({
+                address: deployedAddress,
+                abi: trcTokenOverloadAbi as any,
+                functionName: 'getStored',
+                args: [],
+                account: deployer.address,
+            })
+        );
+    }
+
+    before(async function () {
+        this.timeout(180000);
+
+        const accounts = await tronWebBuilder.getTestAccounts(-1);
+        const idx = accounts.pks.findIndex((p) => /^(0x)?[0-9a-fA-F]{64}$/.test(p));
+        const pk = accounts.pks[idx].replace(/^0x/, '');
+        const ownerHex = accounts.hex[idx];
+        deployer = privateKeyToAccount(`0x${pk}` as `0x${string}`);
+        livePublicClient = createPublicClient({ fullHost: FULL_HOST });
+        liveWalletClient = createWalletClient({ account: deployer, fullHost: FULL_HOST });
+
+        const fullNode = new HttpProvider(FULL_HOST);
+        const deployTx = await tbActions.createSmartContract(
+            fullNode,
+            { abi: trcTokenOverloadAbi as any, bytecode: trcTokenOverloadBytecode, feeLimit: 1_000_000_000 },
+            ownerHex
+        );
+        const signed = await deployer.signTransaction(deployTx);
+        await trxActions.sendRawTransaction(fullNode, signed);
+        await waitForReceipt(deployTx.txID);
+        deployedAddress = deployTx.contract_address;
+    });
+
+    it('deploys a contract to the node and exposes its address', function () {
+        assert.isString(deployedAddress);
+        assert.isNotEmpty(deployedAddress);
+    });
+
+    it('writeContract then readContract round-trips through the real node', async function () {
+        const txid = await liveWalletClient.writeContract({
+            address: deployedAddress,
+            abi: trcTokenOverloadAbi as any,
+            functionName: 'store',
+            args: [5],
+            feeLimit: 1_000_000_000,
+        });
+        assert.isString(txid);
+        const receipt = await waitForReceipt(txid);
+        assert.notEqual(receipt.result, 'FAILED');
+        assert.equal(await readStored(), '5');
+    });
+
+    it('resolves the store(uint256,uint256) overload by arity against the real contract', async function () {
+        // The 2-arg overload (previously unreachable) sets stored = a + b = 12.
+        const receipt = await waitForReceipt(
+            await liveWalletClient.writeContract({
+                address: deployedAddress,
+                abi: trcTokenOverloadAbi as any,
+                functionName: 'store',
+                args: [5, 7],
+                feeLimit: 1_000_000_000,
+            })
+        );
+        assert.notEqual(receipt.result, 'FAILED');
+        assert.equal(await readStored(), '12');
+    });
+
+    it('encodes a trcToken parameter with the correct on-chain selector', async function () {
+        const tokenId = 1_000_001;
+        const amount = 4242;
+        const receipt = await waitForReceipt(
+            await liveWalletClient.writeContract({
+                address: deployedAddress,
+                abi: trcTokenOverloadAbi as any,
+                functionName: 'recordToken',
+                args: [deployer.address, tokenId, amount],
+                feeLimit: 1_000_000_000,
+            })
+        );
+        assert.notEqual(receipt.result, 'FAILED', 'recordToken reverted — wrong selector?');
+
+        const storedAmount = await livePublicClient.readContract({
+            address: deployedAddress,
+            abi: trcTokenOverloadAbi as any,
+            functionName: 'getAmount',
+            args: [],
+            account: deployer.address,
+        });
+        const storedToken = await livePublicClient.readContract({
+            address: deployedAddress,
+            abi: trcTokenOverloadAbi as any,
+            functionName: 'getToken',
+            args: [],
+            account: deployer.address,
+        });
+        assert.equal(String(storedAmount), String(amount));
+        assert.equal(String(storedToken), String(tokenId));
+    });
+
+    it('defaults feeLimit to 150 TRX when writeContract omits it', async function () {
+        const txid = await liveWalletClient.writeContract({
+            address: deployedAddress,
+            abi: trcTokenOverloadAbi as any,
+            functionName: 'store',
+            args: [9],
+        });
+        await waitForReceipt(txid);
+        const tx: any = await livePublicClient.getTransaction({ txId: txid });
+        assert.equal(tx.raw_data.fee_limit, 150_000_000);
+        assert.equal(await readStored(), '9');
+    });
+
+    it('estimateContractGas returns a positive energy estimate from the node', async function () {
+        const energy = await livePublicClient.estimateContractGas({
+            address: deployedAddress,
+            abi: trcTokenOverloadAbi as any,
+            functionName: 'store',
+            args: [3],
+            account: deployer.address,
+        });
+        assert.typeOf(energy, 'bigint');
+        assert.isAbove(Number(energy), 0);
     });
 });
