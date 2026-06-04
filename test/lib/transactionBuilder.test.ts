@@ -2145,6 +2145,34 @@ describe('TronWeb.transactionBuilder', function () {
                 assert.equal(transaction.transaction.raw_data.contract[0].Permission_id || 0, options.permissionId || 0);
             }
         });
+
+        it('maps the 5th positional arg to params and defaults the issuer (legacy form)', async function () {
+            this.timeout(20000);
+
+            const functionSelector = 'testPure(uint256,uint256)';
+            const parameter = [
+                { type: 'uint256', value: 1 },
+                { type: 'uint256', value: 2 },
+            ];
+            // Legacy positional form: (addr, selector, feeLimit, callValue, parametersArray).
+            // The 5th arg must become `parameters` and the issuer must default — not the
+            // other way around (which dropped the params and misrouted the issuer).
+            const tx: any = await tronWeb.transactionBuilder.triggerSmartContract(
+                contractAddress,
+                functionSelector,
+                tronWeb.feeLimit as any,
+                0 as any,
+                parameter as any
+            );
+
+            assert.isTrue(tx.result.result);
+            const value = tx.transaction.raw_data.contract[0].parameter.value;
+            // issuer defaulted to the instance address, not derived from the params array
+            assert.equal(String(value.owner_address).toLowerCase(), String(tronWeb.defaultAddress.hex).toLowerCase());
+            // params were encoded (4-byte selector + two 32-byte args), not dropped
+            assert.isString(value.data);
+            assert.isAbove(value.data.length, 8);
+        });
     });
 
     describe('#triggerComfirmedConstantContract', async function () {

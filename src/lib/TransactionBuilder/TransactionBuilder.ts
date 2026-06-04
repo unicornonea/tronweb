@@ -209,13 +209,17 @@ export class TransactionBuilder {
         let resolvedParameters: ContractFunctionParameter[];
         let resolvedIssuer: string;
         if (typeof options !== 'object') {
-            // legacy positional form: feeLimit, callValue
+            // Legacy positional form:
+            //   triggerSmartContract(addr, selector, feeLimit, callValue, parametersArray)
+            // The numeric 3rd/4th args are feeLimit/callValue; the 5th positional arg
+            // (received here via `issuerAddress`) is the parameters array, and the issuer
+            // defaults — matching pre-refactor behavior.
             resolvedOptions = {
                 feeLimit: options as unknown as number,
                 callValue: parameters as unknown as number,
             };
-            resolvedParameters = [];
-            resolvedIssuer = (issuerAddress ?? this.tronWeb.defaultAddress.hex) as string;
+            resolvedParameters = (issuerAddress as unknown as ContractFunctionParameter[] | undefined) ?? [];
+            resolvedIssuer = this.tronWeb.defaultAddress.hex as string;
         } else {
             resolvedOptions = options ?? {};
             resolvedParameters = parameters ?? [];
