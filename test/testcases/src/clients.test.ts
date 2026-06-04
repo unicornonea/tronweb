@@ -984,3 +984,80 @@ describe('client factories — live TRE @9090', function () {
         assert.isAbove(Number(energy), 0);
     });
 });
+
+// A broadcast failure shaped `{ result: false }` with no `code` is not something a
+// real node reliably produces, so this guard is covered with a mocked provider.
+describe('createWalletClient — broadcast result handling', function () {
+    const account = privateKeyToAccount(`0x${'1'.padStart(64, '0')}` as `0x${string}`);
+
+    it('treats a broadcast { result: false } with no code as a failure', async function () {
+        const stubAccount = {
+            ...account,
+            async signTransaction(transaction: any) {
+                return { ...transaction, signature: ['0xsig'] };
+            },
+        };
+        const fullNode = new HttpProvider('http://127.0.0.1');
+        (fullNode as any).request = async (url: string) => {
+            if (url === 'wallet/getblock') {
+                return { block_header: { raw_data: { number: 100, timestamp: 1_700_000_000_000 } }, blockID: '0'.repeat(64) };
+            }
+            if (url === 'wallet/broadcasttransaction') {
+                return { result: false }; // failure carrying no `code`
+            }
+            throw new Error(`unexpected request to ${url}`);
+        };
+        const walletClient = createWalletClient({ account: stubAccount, fullNode, solidityNode: fullNode });
+
+        const recipient = fromHex('410000000000000000000000000000000000000001');
+        let message = '';
+        try {
+            await walletClient.sendTransaction({
+                type: 'sendTrx',
+                parameters: [recipient, 1, account.address],
+            });
+        } catch (error) {
+            message = (error as Error).message;
+        }
+        assert.equal(message, 'Failed to broadcast transaction');
+    });
+});
+
+describe('createWalletClient — writeContract argument defaulting', function () {
+    const account = privateKeyToAccount(`0x${'1'.padStart(64, '0')}` as `0x${string}`);
+
+    it('defaults omitted args to [] (audit #10) instead of encoding undefined', async function () {
+        const fullNode = new HttpProvider('http://127.0.0.1');
+        const walletClient = createWalletClient({ account, fullNode, solidityNode: fullNode });
+        const capture = async (action: () => Promise<unknown>): Promise<string> => {
+            try {
+                await action();
+                return '';
+            } catch (error) {
+                return (error as Error).message;
+            }
+        };
+
+        // recordToken needs 3 args; the param encoding (which runs before any node
+        // request) must treat an omitted `args` exactly like `args: []`, rather than
+        // throwing an opaque error from encoding `undefined`.
+        const omitted = await capture(() =>
+            walletClient.writeContract({
+                address: account.address,
+                abi: trcTokenOverloadAbi as any,
+                functionName: 'recordToken',
+            } as any)
+        );
+        const empty = await capture(() =>
+            walletClient.writeContract({
+                address: account.address,
+                abi: trcTokenOverloadAbi as any,
+                functionName: 'recordToken',
+                args: [],
+            } as any)
+        );
+
+        assert.notEqual(omitted, '', 'expected recordToken without args to throw');
+        assert.equal(omitted, empty);
+    });
+});
