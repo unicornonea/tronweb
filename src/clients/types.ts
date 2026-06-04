@@ -398,6 +398,27 @@ export type SendTransactionParams<K extends SendTransactionType = SendTransactio
         : never;
 };
 
+/**
+ * Transaction-builder actions that perform a constant/read-only query — constant
+ * contract triggers, energy estimation, and constant deploy. They never produce a
+ * broadcastable transaction, so sendTransaction returns the node's result as-is
+ * instead of signing and broadcasting.
+ */
+export type SendTransactionConstantType =
+    | 'triggerConstantContract'
+    | 'triggerConfirmedConstantContract'
+    | 'estimateEnergy'
+    | 'deployConstantContract';
+
+/**
+ * Resolved return type of WalletClient.sendTransaction for a given action `type`.
+ * Constant/read-only actions resolve to the action's own result; every other action
+ * is signed and broadcast, resolving to the broadcast result.
+ */
+export type SendTransactionReturn<K extends SendTransactionType = SendTransactionType> = K extends SendTransactionConstantType
+    ? Awaited<ReturnType<(typeof tbActions)[K]>>
+    : BroadcastReturn<SignedTransaction>;
+
 /** A write-capable client. */
 export interface WalletClient<TAccount extends WalletAccount = WalletAccount> extends PublicClient {
     /** The Account used for signing */
@@ -437,5 +458,5 @@ export interface WalletClient<TAccount extends WalletAccount = WalletAccount> ex
      */
     sendTransaction<K extends SendTransactionType>(
         params: SendTransactionParams<K>
-    ): Promise<BroadcastReturn<SignedTransaction>>;
+    ): Promise<SendTransactionReturn<K>>;
 }

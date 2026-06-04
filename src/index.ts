@@ -46,7 +46,9 @@ export type {
     ContractFunctions,
     PublicClient,
     PublicClientConfig,
+    SendTransactionConstantType,
     SendTransactionParams,
+    SendTransactionReturn,
     WalletClient,
     WalletClientConfig,
 } from './clients/index.js';
