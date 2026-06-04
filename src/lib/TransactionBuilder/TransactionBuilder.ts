@@ -193,7 +193,9 @@ export class TransactionBuilder {
     ): Promise<CreateSmartContractTransaction> {
         return actions.createSmartContract(
             this.tronWeb.fullNode,
-            { feeLimit: this.tronWeb.feeLimit, ...options },
+            // A falsy feeLimit (0/undefined) falls back to the node default, matching
+            // pre-refactor `options.feeLimit || this.tronWeb.feeLimit`.
+            { ...options, feeLimit: options.feeLimit || this.tronWeb.feeLimit },
             issuerAddress
         );
     }
@@ -230,7 +232,8 @@ export class TransactionBuilder {
             this.tronWeb.solidityNode,
             contractAddress,
             functionSelector,
-            { feeLimit: this.tronWeb.feeLimit, ...resolvedOptions },
+            // A falsy feeLimit (0/undefined) falls back to the node default, matching pre-refactor.
+            { ...resolvedOptions, feeLimit: resolvedOptions.feeLimit || this.tronWeb.feeLimit },
             resolvedParameters,
             resolvedIssuer
         );
