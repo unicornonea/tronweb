@@ -310,6 +310,27 @@ describe('client factories', function () {
         );
     });
 
+    it('getBalance/getAccount default to the wallet address (audit #8)', async function () {
+        this.timeout(60000);
+
+        // The wallet client plumbs defaultAddress = deployer.address, so a no-arg call
+        // resolves to it — matching legacy trx.getBalance(address = tronWeb.defaultAddress.hex).
+        const walletClient = createWalletClient({ account: deployer, fullHost: FULL_NODE_API });
+        const publicClient = createPublicClient({ fullHost: FULL_NODE_API });
+
+        assert.equal(await walletClient.getBalance(), await walletClient.getBalance(deployer.address));
+        assert.isObject(await walletClient.getAccount());
+
+        // A public client has no default address, so a no-arg call must still require one.
+        let threw = false;
+        try {
+            await publicClient.getBalance();
+        } catch {
+            threw = true;
+        }
+        assert.isTrue(threw, 'public getBalance() with no default address should throw');
+    });
+
     it('createWalletClient exposes the expected method surface', function () {
         const walletClient = createWalletClient({ account, chain: nile, transport: http() });
 
@@ -498,6 +519,38 @@ describe('client factories', function () {
         await assertRejectsWithMessage(
             () => (writeContract as any).write.store([1, 2, 3]),
             'Contract function "store" expects 1 or 2 argument(s) but received 3.'
+        );
+    });
+
+    it('rejects a call value beyond the safe integer range (bigint guard)', async function () {
+        // resolveCallValue throws before any node request, so a huge bigint value is
+        // rejected regardless of the contract/method targeted (no deploy needed).
+        const walletClient = createWalletClient({ account, fullHost: FULL_NODE_API });
+        const publicClient = createPublicClient({ fullHost: FULL_NODE_API });
+        const huge = 2n ** 60n; // > Number.MAX_SAFE_INTEGER, would silently truncate via Number()
+
+        await assertRejectsWithMessage(
+            () =>
+                walletClient.writeContract({
+                    address: account.address,
+                    abi: revertFixture.abi as any,
+                    functionName: 'setOwner',
+                    args: [account.address],
+                    value: huge,
+                } as any),
+            'call value exceeds safe integer range'
+        );
+        await assertRejectsWithMessage(
+            () =>
+                publicClient.readContract({
+                    address: account.address,
+                    abi: revertFixture.abi as any,
+                    functionName: 'getOwner',
+                    args: [1],
+                    value: huge,
+                    account: account.address,
+                } as any),
+            'call value exceeds safe integer range'
         );
     });
 
@@ -950,5 +1003,82 @@ describe('client factories — live TRE @9090', function () {
         });
         assert.typeOf(energy, 'bigint');
         assert.isAbove(Number(energy), 0);
+    });
+});
+
+// A broadcast failure shaped `{ result: false }` with no `code` is not something a
+// real node reliably produces, so this guard is covered with a mocked provider.
+describe('createWalletClient — broadcast result handling', function () {
+    const account = privateKeyToAccount(`0x${'1'.padStart(64, '0')}` as `0x${string}`);
+
+    it('treats a broadcast { result: false } with no code as a failure', async function () {
+        const stubAccount = {
+            ...account,
+            async signTransaction(transaction: any) {
+                return { ...transaction, signature: ['0xsig'] };
+            },
+        };
+        const fullNode = new HttpProvider('http://127.0.0.1');
+        (fullNode as any).request = async (url: string) => {
+            if (url === 'wallet/getblock') {
+                return { block_header: { raw_data: { number: 100, timestamp: 1_700_000_000_000 } }, blockID: '0'.repeat(64) };
+            }
+            if (url === 'wallet/broadcasttransaction') {
+                return { result: false }; // failure carrying no `code`
+            }
+            throw new Error(`unexpected request to ${url}`);
+        };
+        const walletClient = createWalletClient({ account: stubAccount, fullNode, solidityNode: fullNode });
+
+        const recipient = fromHex('410000000000000000000000000000000000000001');
+        let message = '';
+        try {
+            await walletClient.sendTransaction({
+                type: 'sendTrx',
+                parameters: [recipient, 1, account.address],
+            });
+        } catch (error) {
+            message = (error as Error).message;
+        }
+        assert.equal(message, 'Failed to broadcast transaction');
+    });
+});
+
+describe('createWalletClient — writeContract argument defaulting', function () {
+    const account = privateKeyToAccount(`0x${'1'.padStart(64, '0')}` as `0x${string}`);
+
+    it('defaults omitted args to [] (audit #10) instead of encoding undefined', async function () {
+        const fullNode = new HttpProvider('http://127.0.0.1');
+        const walletClient = createWalletClient({ account, fullNode, solidityNode: fullNode });
+        const capture = async (action: () => Promise<unknown>): Promise<string> => {
+            try {
+                await action();
+                return '';
+            } catch (error) {
+                return (error as Error).message;
+            }
+        };
+
+        // recordToken needs 3 args; the param encoding (which runs before any node
+        // request) must treat an omitted `args` exactly like `args: []`, rather than
+        // throwing an opaque error from encoding `undefined`.
+        const omitted = await capture(() =>
+            walletClient.writeContract({
+                address: account.address,
+                abi: trcTokenOverloadAbi as any,
+                functionName: 'recordToken',
+            } as any)
+        );
+        const empty = await capture(() =>
+            walletClient.writeContract({
+                address: account.address,
+                abi: trcTokenOverloadAbi as any,
+                functionName: 'recordToken',
+                args: [],
+            } as any)
+        );
+
+        assert.notEqual(omitted, '', 'expected recordToken without args to throw');
+        assert.equal(omitted, empty);
     });
 });

@@ -93,7 +93,14 @@ function resolveCallerAddress(account: string | undefined, defaultAddress?: stri
 
 function resolveCallValue(value: number | bigint | undefined): number | undefined {
     if (value === undefined) return undefined;
-    return typeof value === 'bigint' ? Number(value) : value;
+    if (typeof value === 'bigint') {
+        // Number(bigint) silently loses precision above 2^53; reject rather than truncate.
+        if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+            throw new Error('call value exceeds safe integer range');
+        }
+        return Number(value);
+    }
+    return value;
 }
 
 function extractConstantResultData(transaction: TransactionWrapper): Hex | undefined {
@@ -241,8 +248,14 @@ function matchesContractEventArgs(
 
 function resolveAddressInput(
     input: Parameters<PublicClientActions['getAccount']>[0] | Parameters<PublicClientActions['getBalance']>[0],
-    methodName: 'getAccount' | 'getBalance'
+    methodName: 'getAccount' | 'getBalance',
+    defaultAddress?: string
 ): string {
+    // No explicit address → fall back to the configured (wallet) address, matching legacy
+    // trx.getAccount/getBalance(address = tronWeb.defaultAddress.hex).
+    if (input === undefined && typeof defaultAddress === 'string' && defaultAddress.length > 0) {
+        return defaultAddress;
+    }
     if (input === undefined || input === false || typeof input === 'string') return input as string;
     if (!('address' in input) || typeof input.address !== 'string') {
         throw new Error(`${methodName} requires either an address string or { address }.`);
@@ -445,8 +458,8 @@ export function createClientQueryActions({
 
             return toEventQueryReturn(response, filteredData);
         },
-        getAccount: (input) => trxActions.getAccount(solidityNode, resolveAddressInput(input, 'getAccount')),
-        getBalance: (input) => trxActions.getBalance(solidityNode, resolveAddressInput(input, 'getBalance')),
+        getAccount: (input) => trxActions.getAccount(solidityNode, resolveAddressInput(input, 'getAccount', defaultAddress)),
+        getBalance: (input) => trxActions.getBalance(solidityNode, resolveAddressInput(input, 'getBalance', defaultAddress)),
         getBlock: (input) => trxActions.getBlock(fullNode, resolveBlockInput(input)),
         getBlockByHash: (input) => trxActions.getBlockByHash(fullNode, resolveBlockHashInput(input)),
         getBlockByNumber: (input) => trxActions.getBlockByNumber(fullNode, resolveBlockNumberInput(input)),

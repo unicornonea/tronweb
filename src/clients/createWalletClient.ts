@@ -144,7 +144,14 @@ function getWriteContractFragment<
 
 function resolveCallValue(value: number | bigint | undefined): number | undefined {
     if (value === undefined) return undefined;
-    return typeof value === 'bigint' ? Number(value) : value;
+    if (typeof value === 'bigint') {
+        // Number(bigint) silently loses precision above 2^53; reject rather than truncate.
+        if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+            throw new Error('call value exceeds safe integer range');
+        }
+        return Number(value);
+    }
+    return value;
 }
 
 function resolveSignerAddress(account: WalletAccount, accountOverride: string | undefined): string {
@@ -168,8 +175,13 @@ function getBroadcastErrorMessage(broadcast: Record<string, unknown>): string {
 }
 
 function assertBroadcastOk(broadcast: unknown): void {
-    if (broadcast && typeof broadcast === 'object' && (broadcast as { code?: unknown }).code) {
-        throw new Error(getBroadcastErrorMessage(broadcast as Record<string, unknown>));
+    if (broadcast && typeof broadcast === 'object') {
+        const result = broadcast as { code?: unknown; result?: unknown };
+        // `.code` covers normal TRON broadcast failures; `result === false` also covers a
+        // failure shaped `{ result: false }` that carries no code.
+        if (result.code || result.result === false) {
+            throw new Error(getBroadcastErrorMessage(broadcast as Record<string, unknown>));
+        }
     }
 }
 
@@ -263,7 +275,7 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
         address,
         abi,
         functionName,
-        args,
+        args = [] as unknown as WriteContractParameters<Abi, FunctionName>['args'],
         account: accountOverride,
         value,
         feeLimit: callFeeLimit,
