@@ -3,8 +3,7 @@ import config from '../helpers/config.js';
 import tronWebBuilder from '../helpers/tronWebBuilder.js';
 import testUtils from '../helpers/testUtils.js';
 import diskUtils from '../testcases/src/disk-utils.js';
-import { buildFullTypeDefinition } from '../../src/utils/abi.js';
-import type { AbiParamsCommon } from '../../src/types/ABI.js';
+import { buildFullTypeDefinition, buildFunctionSelector } from '../../src/utils/abi.js';
 
 const { ADDRESS_HEX, ADDRESS_BASE58 } = config;
 const { loadTests } = diskUtils;
@@ -175,15 +174,6 @@ describe('TronWeb.utils.abi', function () {
     });
 
     describe('#buildFunctionSelector()', function () {
-        // The client factories build a constant-call function selector as
-        // `${fragment.name}(${inputs.map(buildFullTypeDefinition).join(',')})`.
-        // buildFunctionSelector itself is a private one-liner duplicated in the
-        // client files, so these tests exercise its building block,
-        // buildFullTypeDefinition, plus the selector composition it produces.
-        function buildFunctionSelector(fragment: { name: string; inputs: ReadonlyArray<AbiParamsCommon> }) {
-            return `${fragment.name}(${fragment.inputs.map((input) => buildFullTypeDefinition(input)).join(',')})`;
-        }
-
         it('returns primitive types unchanged', function () {
             assert.equal(buildFullTypeDefinition({ name: 'a', type: 'uint256' }), 'uint256');
             assert.equal(buildFullTypeDefinition({ name: 'b', type: 'address' }), 'address');
@@ -265,6 +255,7 @@ describe('TronWeb.utils.abi', function () {
         it('builds a function selector with a trcToken parameter', function () {
             assert.equal(
                 buildFunctionSelector({
+                    type: 'function',
                     name: 'transferToken',
                     inputs: [
                         { name: 'to', type: 'address' },
@@ -279,6 +270,7 @@ describe('TronWeb.utils.abi', function () {
         it('builds a function selector with nested tuple and trcToken parameters', function () {
             assert.equal(
                 buildFunctionSelector({
+                    type: 'function',
                     name: 'inspect',
                     inputs: [
                         {
