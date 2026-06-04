@@ -820,6 +820,45 @@ describe('client factories', function () {
         );
     });
 
+    it('rejects a call value beyond the safe integer range (bigint guard)', async function () {
+        const fullNode = makeMockProvider('fullNode');
+        const solidityNode = makeMockProvider('solidityNode');
+        const walletClient = createWalletClient({
+            account,
+            fullNode: fullNode.provider,
+            solidityNode: solidityNode.provider,
+        });
+        const publicClient = createPublicClient({
+            fullNode: fullNode.provider,
+            solidityNode: solidityNode.provider,
+        });
+        const huge = 2n ** 60n; // > Number.MAX_SAFE_INTEGER, would silently truncate via Number()
+
+        await assertRejectsWithMessage(
+            () =>
+                walletClient.writeContract({
+                    address: contractAddress,
+                    abi: testWriteContractAbi,
+                    functionName: 'transfer',
+                    args: [account.address, 1],
+                    value: huge,
+                }),
+            'call value exceeds safe integer range'
+        );
+        await assertRejectsWithMessage(
+            () =>
+                publicClient.readContract({
+                    address: contractAddress,
+                    abi: testReadContractAbi,
+                    functionName: 'balanceOf',
+                    args: [account.address],
+                    value: huge,
+                    account: account.address,
+                } as any),
+            'call value exceeds safe integer range'
+        );
+    });
+
     it('throws when sendTransaction broadcast returns an error code', async function () {
         const stubAccount = {
             ...account,
