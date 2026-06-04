@@ -153,14 +153,20 @@ type WriteContractInputs<
 
 type CollapseSingleItemTuple<Value> = Value extends readonly [infer Only] ? Only : Value;
 
+type IsNever<T> = [T] extends [never] ? true : false;
+
+type ChangeNeverToAnyArray<T> = IsNever<T> extends true ? ReadonlyArray<any> : T;
+
+type ChangeNeverToString<T> = IsNever<T> extends true ? string : T;
+
 export type ReadContractParameters<
     Abi extends ContractAbiInterface = ContractAbiInterface,
     FunctionName extends ReadContractFunctionName<Abi> = ReadContractFunctionName<Abi>,
 > = {
     readonly address: string;
     readonly abi: Abi;
-    readonly functionName: FunctionName;
-    readonly args?: GetParamsType<ReadContractInputs<Abi, FunctionName>>;
+    readonly functionName: ChangeNeverToString<FunctionName>;
+    readonly args?: ChangeNeverToAnyArray<GetParamsType<ReadContractInputs<Abi, FunctionName>>>;
     readonly account?: string;
     readonly value?: number | bigint;
 };
@@ -176,8 +182,8 @@ export type EstimateContractGasParameters<
 > = {
     readonly address: string;
     readonly abi: Abi;
-    readonly functionName: FunctionName;
-    readonly args?: GetParamsType<ReadContractInputs<Abi, FunctionName>>;
+    readonly functionName: ChangeNeverToString<FunctionName>;
+    readonly args?: ChangeNeverToAnyArray<GetParamsType<ReadContractInputs<Abi, FunctionName>>>;
     readonly account?: string;
     readonly value?: number | bigint;
 };
@@ -206,8 +212,8 @@ export type WriteContractParameters<
 > = {
     readonly address: string;
     readonly abi: Abi;
-    readonly functionName: FunctionName;
-    readonly args?: GetParamsType<WriteContractInputs<Abi, FunctionName>>;
+    readonly functionName: ChangeNeverToString<FunctionName>;
+    readonly args?: ChangeNeverToAnyArray<GetParamsType<WriteContractInputs<Abi, FunctionName>>>;
     readonly account?: string;
     readonly value?: number | bigint;
     readonly feeLimit?: number;

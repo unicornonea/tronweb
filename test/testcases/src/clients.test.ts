@@ -85,8 +85,8 @@ describe('client factories', function () {
     // revert paths against a real node instead of a mocked provider.
     const onChainFullNode = new HttpProvider(FULL_NODE_API);
     const revertFixture = Contracts.testRevert;
-    const getOwnerFragment = revertFixture.abi.find((f: any) => f.name === 'getOwner') as any;
-    const setOwnerFragment = revertFixture.abi.find((f: any) => f.name === 'setOwner') as any;
+    const getOwnerFragment = revertFixture.abi.find((f: any) => f.name === 'getOwner');
+    const setOwnerFragment = revertFixture.abi.find((f: any) => f.name === 'setOwner');
     let deployer: ReturnType<typeof privateKeyToAccount>;
     let deployerHex: string;
     let funded: { b58: string[]; hex: string[]; pks: string[] };
@@ -118,7 +118,7 @@ describe('client factories', function () {
 
         const deployTx = await tbActions.createSmartContract(
             onChainFullNode,
-            { abi: revertFixture.abi as any, bytecode: revertFixture.bytecode, feeLimit: 1_000_000_000 },
+            { abi: revertFixture.abi, bytecode: revertFixture.bytecode, feeLimit: 1_000_000_000 },
             deployerHex
         );
         const signedDeploy = await deployer.signTransaction(deployTx);
@@ -224,7 +224,7 @@ describe('client factories', function () {
         assert.property(latest, 'block_header');
         const latestNum = latest.block_header.raw_data.number;
         assert.isAbove(latestNum, 0);
-        assert.deepEqual((await publicClient.getBlock({ blockTag: 'latest' })) as any, latest as any);
+        assert.deepEqual(await publicClient.getBlock({ blockTag: 'latest' }), latest);
         const byNum: any = await publicClient.getBlock({ blockNumber: latestNum });
         assert.equal(byNum.block_header.raw_data.number, latestNum);
         const byHash: any = await publicClient.getBlock({ blockHash: latest.blockID });
@@ -265,9 +265,9 @@ describe('client factories', function () {
         assert.match(callResult.data as string, /^0x[0-9a-f]{64}$/i);
 
         // readContract through the abi: getOwner(1) returns an address-shaped value
-        const owner = await (publicClient.readContract as any)({
+        const owner = await publicClient.readContract({
             address: revertAddress,
-            abi: revertFixture.abi as any,
+            abi: revertFixture.abi,
             functionName: 'getOwner',
             args: [1],
             account: deployer.address,
@@ -275,9 +275,9 @@ describe('client factories', function () {
         assert.lengthOf(addrBody(owner as string), 40);
 
         // estimateContractGas for a state-changing call returns positive energy
-        const energy = await (publicClient.estimateContractGas as any)({
+        const energy = await publicClient.estimateContractGas({
             address: revertAddress,
-            abi: revertFixture.abi as any,
+            abi: revertFixture.abi,
             functionName: 'setOwner',
             args: [deployer.address],
             account: deployer.address,
@@ -287,7 +287,7 @@ describe('client factories', function () {
 
         // Verify helpers are local crypto (no node)
         const messageSignature = await deployer.signMessage({ message: 'hello tron' });
-        const typedDataSignature = await deployer.signTypedData(testTypedData as any);
+        const typedDataSignature = await deployer.signTypedData(testTypedData);
         assert.isTrue(
             await publicClient.verifyMessage({ address: deployer.address, message: 'hello tron', signature: messageSignature })
         );
@@ -354,7 +354,7 @@ describe('client factories', function () {
     it('covers wallet client write helpers via writeContract / signTransaction / sendRawTransaction', async function () {
         this.timeout(120000);
         const walletClient = onChainWalletClient;
-        const abi = revertFixture.abi as any;
+        const abi = revertFixture.abi;
         const other = funded.b58.find((a) => a !== deployer.address)!;
         const addrBody = (a: string) =>
             (/^(0x)?(41)?[0-9a-f]{40}$/i.test(a) ? a : toHex(a)).toLowerCase().replace(/^0x/, '').replace(/^41/, '');
@@ -363,8 +363,8 @@ describe('client factories', function () {
         assert.deepEqual(await walletClient.getAddresses(), [deployer.address]);
         assert.deepEqual(await walletClient.requestAddresses(), [deployer.address]);
         assert.equal(
-            await walletClient.signTypedData(testTypedData as any),
-            await deployer.signTypedData(testTypedData as any)
+            await walletClient.signTypedData(testTypedData),
+            await deployer.signTypedData(testTypedData)
         );
 
         // signTransaction signs a real node-built transaction, then sendRawTransaction
@@ -377,7 +377,7 @@ describe('client factories', function () {
         assert.isTrue(sendRawResult.result === true || typeof sendRawResult.txid === 'string');
 
         // writeContract performs a real state-changing call (setOwner) and returns its txID
-        const writeTxId = await (walletClient.writeContract as any)({
+        const writeTxId = await walletClient.writeContract({
             address: revertAddress,
             abi,
             functionName: 'setOwner',
@@ -390,7 +390,7 @@ describe('client factories', function () {
         assert.notEqual(receipt.result, 'FAILED', 'setOwner reverted on chain');
 
         // the write is observable on chain: getOwner(1) now returns the address we set
-        const owner = await (onChainPublicClient.readContract as any)({
+        const owner = await onChainPublicClient.readContract({
             address: revertAddress,
             abi,
             functionName: 'getOwner',
@@ -402,17 +402,17 @@ describe('client factories', function () {
         // client-side guards (these throw before any node request)
         await assertRejectsWithMessage(
             () =>
-                (walletClient.writeContract as any)({
+                walletClient.writeContract({
                     address: revertAddress,
                     abi,
                     functionName: 'getOwner',
                     args: [1],
-                } as any),
+                }),
             'Function "getOwner" is read-only.'
         );
         await assertRejectsWithMessage(
             () =>
-                (walletClient.writeContract as any)({
+                walletClient.writeContract({
                     address: revertAddress,
                     abi,
                     functionName: 'setOwner',
@@ -441,7 +441,7 @@ describe('client factories', function () {
         // instead of throwing "Invalid feeLimit provided": the generic dispatcher injects
         // the client feeLimit before the action validator runs. A successful broadcast
         // (no throw) proves the default was applied.
-        const broadcast: any = await walletClient.sendTransaction({
+        const broadcast = await walletClient.sendTransaction({
             type: 'triggerSmartContract',
             parameters: [
                 revertAddress,
@@ -450,11 +450,11 @@ describe('client factories', function () {
                 [],
                 deployer.address,
             ],
-        } as any);
+        });
         assert.isTrue(broadcast.result === true || typeof broadcast.txid === 'string');
 
         // An explicitly provided feeLimit works the same way.
-        const explicit: any = await walletClient.sendTransaction({
+        const explicit = await walletClient.sendTransaction({
             type: 'triggerSmartContract',
             parameters: [
                 revertAddress,
@@ -463,7 +463,7 @@ describe('client factories', function () {
                 [],
                 deployer.address,
             ],
-        } as any);
+        });
         assert.isTrue(explicit.result === true || typeof explicit.txid === 'string');
     });
 
@@ -473,25 +473,25 @@ describe('client factories', function () {
         // so overload resolution is exercised against the node instead of a mocked provider.
         const deployTx = await tbActions.createSmartContract(
             onChainFullNode,
-            { abi: trcTokenOverloadAbi as any, bytecode: trcTokenOverloadBytecode, feeLimit: 1_000_000_000 },
+            { abi: trcTokenOverloadAbi, bytecode: trcTokenOverloadBytecode, feeLimit: 1_000_000_000 },
             deployerHex
         );
         await trxActions.sendRawTransaction(onChainFullNode, await deployer.signTransaction(deployTx));
         await waitForReceipt(deployTx.txID);
         const address = deployTx.contract_address;
 
-        const writeContract = getContract({ client: onChainWalletClient, abi: trcTokenOverloadAbi as any, address });
-        const readContract = getContract({ client: onChainPublicClient, abi: trcTokenOverloadAbi as any, address });
+        const writeContract = getContract({ client: onChainWalletClient, abi: trcTokenOverloadAbi, address });
+        const readContract = getContract({ client: onChainPublicClient, abi: trcTokenOverloadAbi, address });
         const readStored = async () =>
-            String(await (readContract as any).read.getStored([], { account: deployer.address }));
+            String(await readContract.read.getStored([], { account: deployer.address }));
 
         // Both overloads are reachable through the getContract write namespace, and each
         // resolves to its OWN selector — proven by the distinct on-chain effect:
         //   store(uint256)          sets stored = a      (= 5)
         //   store(uint256,uint256)  sets stored = a + b  (= 12)  [previously unreachable]
-        await waitForReceipt(await (writeContract as any).write.store([5], { feeLimit: 1_000_000_000 }));
+        await waitForReceipt(await writeContract.write.store([5], { feeLimit: 1_000_000_000 }));
         assert.equal(await readStored(), '5');
-        await waitForReceipt(await (writeContract as any).write.store([5, 7], { feeLimit: 1_000_000_000 }));
+        await waitForReceipt(await writeContract.write.store([5, 7], { feeLimit: 1_000_000_000 }));
         assert.equal(await readStored(), '12');
 
         // Arg-count validation is overload-aware (accepts any overload's arity, lists all).
@@ -544,7 +544,7 @@ describe('client factories', function () {
 
         // getOwner(1) is a view call against the real contract — it returns a constant
         // result wrapper, not a broadcastable transaction.
-        const result: any = await walletClient.sendTransaction({
+        const result = await walletClient.sendTransaction({
             type: 'triggerConstantContract',
             parameters: [
                 revertAddress,
@@ -553,14 +553,14 @@ describe('client factories', function () {
                 [],
                 deployer.address,
             ],
-        } as any);
+        });
 
         // The node's constant-call result is returned as-is: it carries result/constant_result
         // and is NOT a broadcast result (which would carry a txid).
         assert.isTrue(result.result.result, 'constant call should succeed on chain');
         assert.isArray(result.constant_result, 'constant call result must be returned directly');
         assert.match(result.constant_result[0], /^[0-9a-f]{64}$/i);
-        assert.isUndefined(result.txid, 'must not be a broadcast result');
+        assert.isUndefined((result as any).txid, 'must not be a broadcast result');
         assert.isFalse(signCalled, 'constant calls must not be signed');
     });
 
@@ -617,7 +617,7 @@ describe('client factories', function () {
         const publicClient = createPublicClientFromRoot({ chain: mainnet, transport: http() });
         const rawMessage = '0x68656c6c6f2074726f6e';
         const rawMessageSignature = await account.signMessage({ message: { raw: rawMessage } });
-        const typedDataSignature = await account.signTypedData(testTypedData as any);
+        const typedDataSignature = await account.signTypedData(testTypedData);
 
         assert.isTrue(
             await publicClient.verifyMessage({
@@ -650,7 +650,7 @@ describe('client factories', function () {
     it('covers call, readContract, and estimateContractGas error branches', async function () {
         this.timeout(60000);
         const publicClient = onChainPublicClient;
-        const abi = revertFixture.abi as any;
+        const abi = revertFixture.abi;
         // The contract reverts setOwner for this hard-coded forbidden address.
         const forbidden = fromHex('41b6e447d1d576de6c7f767c32a649f0ad50ae5975');
 
@@ -672,22 +672,22 @@ describe('client factories', function () {
         // Client-side guards (throw before any node request)
         await assertRejectsWithMessage(
             () =>
-                (publicClient.readContract as any)({
+                publicClient.readContract({
                     address: revertAddress,
                     abi,
                     functionName: 'setOwner',
                     args: [deployer.address],
-                } as any),
+                }),
             'Function "setOwner" is not read-only.'
         );
         await assertRejectsWithMessage(
             () =>
-                (publicClient.estimateContractGas as any)({
+                publicClient.estimateContractGas({
                     address: revertAddress,
                     abi,
                     functionName: 'getOwner',
                     args: [1],
-                } as any),
+                }),
             'Function "getOwner" is read-only.'
         );
 
@@ -695,7 +695,7 @@ describe('client factories', function () {
         // fails: on a live node the revert is surfaced from the action layer.
         let estimateMsg = '';
         try {
-            await (publicClient.estimateContractGas as any)({
+            await publicClient.estimateContractGas({
                 address: revertAddress,
                 abi,
                 functionName: 'setOwner',
@@ -758,7 +758,7 @@ describe('client factories', function () {
         });
 
         it('verifyTypedData agrees with Trx.verifyTypedData', async function () {
-            const signature = await account.signTypedData(testTypedData as any);
+            const signature = await account.signTypedData(testTypedData);
 
             assert.isTrue(
                 await publicClient.verifyTypedData({
@@ -772,8 +772,8 @@ describe('client factories', function () {
             );
             assert.isTrue(
                 Trx.verifyTypedData(
-                    testTypedData.domain as any,
-                    testTypedData.types as any,
+                    testTypedData.domain,
+                    testTypedData.types,
                     testTypedData.message,
                     signature,
                     account.address
@@ -792,8 +792,8 @@ describe('client factories', function () {
             );
             assert.isFalse(
                 Trx.verifyTypedData(
-                    testTypedData.domain as any,
-                    testTypedData.types as any,
+                    testTypedData.domain,
+                    testTypedData.types,
                     testTypedData.message,
                     signature,
                     wrongAddress
@@ -830,7 +830,7 @@ describe('client factories — live TRE @9090', function () {
         return String(
             await livePublicClient.readContract({
                 address: deployedAddress,
-                abi: trcTokenOverloadAbi as any,
+                abi: trcTokenOverloadAbi,
                 functionName: 'getStored',
                 args: [],
                 account: deployer.address,
@@ -852,7 +852,7 @@ describe('client factories — live TRE @9090', function () {
         const fullNode = new HttpProvider(FULL_HOST);
         const deployTx = await tbActions.createSmartContract(
             fullNode,
-            { abi: trcTokenOverloadAbi as any, bytecode: trcTokenOverloadBytecode, feeLimit: 1_000_000_000 },
+            { abi: trcTokenOverloadAbi, bytecode: trcTokenOverloadBytecode, feeLimit: 1_000_000_000 },
             ownerHex
         );
         const signed = await deployer.signTransaction(deployTx);
@@ -869,7 +869,7 @@ describe('client factories — live TRE @9090', function () {
     it('writeContract then readContract round-trips through the real node', async function () {
         const txid = await liveWalletClient.writeContract({
             address: deployedAddress,
-            abi: trcTokenOverloadAbi as any,
+            abi: trcTokenOverloadAbi,
             functionName: 'store',
             args: [5],
             feeLimit: 1_000_000_000,
@@ -885,7 +885,7 @@ describe('client factories — live TRE @9090', function () {
         const receipt = await waitForReceipt(
             await liveWalletClient.writeContract({
                 address: deployedAddress,
-                abi: trcTokenOverloadAbi as any,
+                abi: trcTokenOverloadAbi,
                 functionName: 'store',
                 args: [5, 7],
                 feeLimit: 1_000_000_000,
@@ -901,7 +901,7 @@ describe('client factories — live TRE @9090', function () {
         const receipt = await waitForReceipt(
             await liveWalletClient.writeContract({
                 address: deployedAddress,
-                abi: trcTokenOverloadAbi as any,
+                abi: trcTokenOverloadAbi,
                 functionName: 'recordToken',
                 args: [deployer.address, tokenId, amount],
                 feeLimit: 1_000_000_000,
@@ -911,14 +911,14 @@ describe('client factories — live TRE @9090', function () {
 
         const storedAmount = await livePublicClient.readContract({
             address: deployedAddress,
-            abi: trcTokenOverloadAbi as any,
+            abi: trcTokenOverloadAbi,
             functionName: 'getAmount',
             args: [],
             account: deployer.address,
         });
         const storedToken = await livePublicClient.readContract({
             address: deployedAddress,
-            abi: trcTokenOverloadAbi as any,
+            abi: trcTokenOverloadAbi,
             functionName: 'getToken',
             args: [],
             account: deployer.address,
@@ -930,7 +930,7 @@ describe('client factories — live TRE @9090', function () {
     it('defaults feeLimit to 150 TRX when writeContract omits it', async function () {
         const txid = await liveWalletClient.writeContract({
             address: deployedAddress,
-            abi: trcTokenOverloadAbi as any,
+            abi: trcTokenOverloadAbi,
             functionName: 'store',
             args: [9],
         });
@@ -943,7 +943,7 @@ describe('client factories — live TRE @9090', function () {
     it('estimateContractGas returns a positive energy estimate from the node', async function () {
         const energy = await livePublicClient.estimateContractGas({
             address: deployedAddress,
-            abi: trcTokenOverloadAbi as any,
+            abi: trcTokenOverloadAbi,
             functionName: 'store',
             args: [3],
             account: deployer.address,
