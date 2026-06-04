@@ -4,6 +4,16 @@ import { privateKeyToAccount } from '../../../src/accounts/privateKeyToAccount.j
 import { createContract, getContract } from '../../../src/clients/getContract.js';
 import { createPublicClient } from '../../../src/clients/createPublicClient.js';
 import { createWalletClient } from '../../../src/clients/createWalletClient.js';
+import { HttpProvider } from '../../../src/lib/providers/index.js';
+import { toHex } from '../../../src/utils/address.js';
+import * as tbActions from '../../../src/lib/actions/transactionBuilder.js';
+import * as trxActions from '../../../src/lib/actions/trx.js';
+import tronWebBuilder from '../../helpers/tronWebBuilder.js';
+import wait from '../../helpers/wait.js';
+import config from '../../helpers/config.js';
+import Contracts from '../../fixtures/contracts.js';
+
+const { FULL_NODE_API } = config;
 
 describe('getContract', function () {
     const fullHost = 'http://127.0.0.1';
@@ -301,5 +311,118 @@ describe('getContract', function () {
         assert.isObject((contract as any).read);
         assert.isFunction((contract as any).read.read);
         assert.equal(await (contract as any).read.read(), 'read');
+    });
+
+    describe('against a contract deployed to the fullNode', function () {
+        this.timeout(180000);
+
+        // funcABIV2_3 exposes setStruct((address,address,address)) (a struct/tuple
+        // parameter write), get1()/s(uint256) (tuple reads), so one deploy covers
+        // read, write, estimate and argument-validation against a real contract.
+        const fixture = Contracts.funcABIV2_3;
+        let deployer: ReturnType<typeof privateKeyToAccount>;
+        let publicClient: ReturnType<typeof createPublicClient>;
+        let walletClient: ReturnType<typeof createWalletClient>;
+        let deployedAddress: string;
+        let struct: [string, string, string];
+
+        async function waitForReceipt(txId: string): Promise<any> {
+            for (let i = 0; i < 20; i++) {
+                const info: any = await publicClient.getTransactionInfo({ txId }).catch(() => ({}));
+                if (info && Object.keys(info).length) return info;
+                await wait(3);
+            }
+            throw new Error(`transaction not confirmed on chain: ${txId}`);
+        }
+
+        const addrBody = (a: string) =>
+            (/^(0x)?(41)?[0-9a-f]{40}$/i.test(a) ? a : toHex(a)).toLowerCase().replace(/^0x/, '').replace(/^41/, '');
+
+        before(async function () {
+            this.timeout(180000);
+
+            const accounts = await tronWebBuilder.getTestAccounts(-1);
+            const idx = accounts.pks.findIndex((p) => /^(0x)?[0-9a-fA-F]{64}$/.test(p));
+            const pk = accounts.pks[idx].replace(/^0x/, '');
+            const ownerHex = accounts.hex[idx];
+            deployer = privateKeyToAccount(`0x${pk}` as `0x${string}`);
+            struct = [accounts.b58[1], accounts.b58[2], accounts.b58[3]];
+
+            const fullNode = new HttpProvider(FULL_NODE_API);
+            publicClient = createPublicClient({ fullHost: FULL_NODE_API });
+            walletClient = createWalletClient({ account: deployer, fullHost: FULL_NODE_API });
+
+            const deployTx = await tbActions.createSmartContract(
+                fullNode,
+                { abi: fixture.abi, bytecode: fixture.bytecode, feeLimit: 1_000_000_000 },
+                ownerHex
+            );
+            const signedDeploy = await deployer.signTransaction(deployTx);
+            await trxActions.sendRawTransaction(fullNode, signedDeploy);
+            await waitForReceipt(deployTx.txID);
+            deployedAddress = deployTx.contract_address;
+        });
+
+        it('exposes read/estimate namespaces and refuses writes on a public client', async function () {
+            const contract = getContract({ client: publicClient, abi: fixture.abi as any, address: deployedAddress });
+
+            assert.equal(contract.address, deployedAddress);
+            assert.strictEqual(contract.abi, fixture.abi);
+            assert.isFunction((contract as any).get1);
+            assert.isFunction((contract as any).setStruct);
+            assert.isFunction((contract as any).read.get1);
+            assert.isFunction((contract as any).estimateGas.setStruct);
+            assert.isUndefined((contract as any).write);
+
+            // setStruct modifies state, so it must reject on a public client
+            await assertRejectsWithMessage(
+                () => (contract as any).setStruct(struct),
+                'Method "setStruct" modifies state and requires a WalletClient. Use createWalletClient() instead of createPublicClient().'
+            );
+        });
+
+        it('writes a tuple via setStruct and reads it back via get1', async function () {
+            const writeContract = getContract({ client: walletClient, abi: fixture.abi as any, address: deployedAddress });
+            const readContract = getContract({ client: publicClient, abi: fixture.abi as any, address: deployedAddress });
+
+            // write namespace form: args array + object-style options
+            const writeTxId = await (writeContract as any).write.setStruct([struct], { feeLimit: 1_000_000_000 });
+            assert.isString(writeTxId);
+            const receipt = await waitForReceipt(writeTxId);
+            assert.notEqual(receipt.result, 'FAILED', 'setStruct reverted on chain');
+
+            // the tuple must round-trip through the real contract storage
+            const raw: any = await (readContract as any).get1();
+            const tuple = Array.isArray(raw[0]) ? raw[0] : raw;
+            assert.equal(addrBody(tuple[0]), addrBody(struct[0]));
+            assert.equal(addrBody(tuple[1]), addrBody(struct[1]));
+            assert.equal(addrBody(tuple[2]), addrBody(struct[2]));
+        });
+
+        it('estimates energy for a contract call', async function () {
+            const contract = getContract({ client: publicClient, abi: fixture.abi as any, address: deployedAddress });
+
+            const energy = await (contract as any).estimateGas.setStruct([struct], { account: deployer.address });
+            assert.typeOf(energy, 'bigint');
+            assert.isAbove(Number(energy), 0);
+        });
+
+        it('rejects calls with the wrong number of arguments', function () {
+            const contract = getContract({ client: publicClient, abi: fixture.abi as any, address: deployedAddress });
+
+            // s(uint256) takes exactly one argument
+            assert.throws(
+                () => (contract as any).s(1, 2),
+                'Contract function "s" expects 1 argument(s) but received 2.'
+            );
+            assert.throws(
+                () => (contract as any).s(),
+                'Contract function "s" expects 1 argument(s) but received 0.'
+            );
+            assert.throws(
+                () => (contract as any).read.s([1, 2]),
+                'Contract function "s" expects 1 argument(s) but received 2.'
+            );
+        });
     });
 });

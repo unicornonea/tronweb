@@ -421,7 +421,7 @@ describe('client factories', function () {
             '42'
         );
         const tupleReadRequest = fullNode.calls.find(
-            (c) => c.params.function_selector === 'inspect(tuple(address,uint256,tuple(address,bool)),tuple(address,uint256)[])'
+            (c) => c.params.function_selector === 'inspect((address,uint256,(address,bool)),(address,uint256)[])'
         );
         assert.isOk(tupleReadRequest);
 

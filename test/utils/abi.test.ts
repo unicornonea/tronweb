@@ -3,6 +3,8 @@ import config from '../helpers/config.js';
 import tronWebBuilder from '../helpers/tronWebBuilder.js';
 import testUtils from '../helpers/testUtils.js';
 import diskUtils from '../testcases/src/disk-utils.js';
+import { buildFullTypeDefinition } from '../../src/utils/abi.js';
+import type { AbiParamsCommon } from '../../src/types/ABI.js';
 
 const { ADDRESS_HEX, ADDRESS_BASE58 } = config;
 const { loadTests } = diskUtils;
@@ -169,6 +171,144 @@ describe('TronWeb.utils.abi', function () {
                 const encoded = coder.encodeParamsV2ByABI(funcABI[0], inputValues);
                 assert.equal(encoded, result, 'encoded data - ' + title);
             });
+        });
+    });
+
+    describe('#buildFunctionSelector()', function () {
+        // The client factories build a constant-call function selector as
+        // `${fragment.name}(${inputs.map(buildFullTypeDefinition).join(',')})`.
+        // buildFunctionSelector itself is a private one-liner duplicated in the
+        // client files, so these tests exercise its building block,
+        // buildFullTypeDefinition, plus the selector composition it produces.
+        function buildFunctionSelector(fragment: { name: string; inputs: ReadonlyArray<AbiParamsCommon> }) {
+            return `${fragment.name}(${fragment.inputs.map((input) => buildFullTypeDefinition(input)).join(',')})`;
+        }
+
+        it('returns primitive types unchanged', function () {
+            assert.equal(buildFullTypeDefinition({ name: 'a', type: 'uint256' }), 'uint256');
+            assert.equal(buildFullTypeDefinition({ name: 'b', type: 'address' }), 'address');
+            assert.equal(buildFullTypeDefinition({ name: 'c', type: 'bool' }), 'bool');
+            assert.equal(buildFullTypeDefinition({ name: 'd', type: 'uint256[]' }), 'uint256[]');
+        });
+
+        it('rewrites the trcToken type to uint256', function () {
+            assert.equal(buildFullTypeDefinition({ name: 'tokenId', type: 'trcToken' }), 'uint256');
+        });
+
+        it('rewrites trcToken arrays to uint256 arrays', function () {
+            assert.equal(buildFullTypeDefinition({ name: 'tokenIds', type: 'trcToken[]' }), 'uint256[]');
+        });
+
+        it('rewrites a trcToken nested inside a tuple', function () {
+            assert.equal(
+                buildFullTypeDefinition({
+                    name: 'payload',
+                    type: 'tuple',
+                    components: [
+                        { name: 'token', type: 'trcToken' },
+                        { name: 'amount', type: 'uint256' },
+                    ],
+                }),
+                '(uint256,uint256)'
+            );
+        });
+
+        it('expands a flat tuple into the parenthesized form', function () {
+            assert.equal(
+                buildFullTypeDefinition({
+                    name: 'payload',
+                    type: 'tuple',
+                    components: [
+                        { name: 'owner', type: 'address' },
+                        { name: 'amount', type: 'uint256' },
+                    ],
+                }),
+                '(address,uint256)'
+            );
+        });
+
+        it('expands nested tuples recursively', function () {
+            assert.equal(
+                buildFullTypeDefinition({
+                    name: 'payload',
+                    type: 'tuple',
+                    components: [
+                        { name: 'owner', type: 'address' },
+                        {
+                            name: 'flags',
+                            type: 'tuple',
+                            components: [
+                                { name: 'approver', type: 'address' },
+                                { name: 'enabled', type: 'bool' },
+                            ],
+                        },
+                    ],
+                }),
+                '(address,(address,bool))'
+            );
+        });
+
+        it('keeps the array suffix when expanding tuple arrays', function () {
+            assert.equal(
+                buildFullTypeDefinition({
+                    name: 'history',
+                    type: 'tuple[]',
+                    components: [
+                        { name: 'account', type: 'address' },
+                        { name: 'amount', type: 'uint256' },
+                    ],
+                }),
+                '(address,uint256)[]'
+            );
+        });
+
+        it('builds a function selector with a trcToken parameter', function () {
+            assert.equal(
+                buildFunctionSelector({
+                    name: 'transferToken',
+                    inputs: [
+                        { name: 'to', type: 'address' },
+                        { name: 'tokenId', type: 'trcToken' },
+                        { name: 'amount', type: 'uint256' },
+                    ],
+                }),
+                'transferToken(address,uint256,uint256)'
+            );
+        });
+
+        it('builds a function selector with nested tuple and trcToken parameters', function () {
+            assert.equal(
+                buildFunctionSelector({
+                    name: 'inspect',
+                    inputs: [
+                        {
+                            name: 'payload',
+                            type: 'tuple',
+                            components: [
+                                { name: 'owner', type: 'address' },
+                                { name: 'token', type: 'trcToken' },
+                                {
+                                    name: 'flags',
+                                    type: 'tuple',
+                                    components: [
+                                        { name: 'approver', type: 'address' },
+                                        { name: 'enabled', type: 'bool' },
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            name: 'history',
+                            type: 'tuple[]',
+                            components: [
+                                { name: 'account', type: 'address' },
+                                { name: 'amount', type: 'uint256' },
+                            ],
+                        },
+                    ],
+                }),
+                'inspect((address,uint256,(address,bool)),(address,uint256)[])'
+            );
         });
     });
 

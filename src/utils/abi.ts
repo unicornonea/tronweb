@@ -67,7 +67,7 @@ export function buildFullTypeDefinition(typeDef: AbiParamsCommon): string {
         const innerTypes = typeDef.components.map((innerType: AbiParamsCommon) => {
             return buildFullTypeDefinition(innerType);
         });
-        return `tuple(${innerTypes.join(',')})${extractSize(typeDef.type)}`;
+        return `(${innerTypes.join(',')})${extractSize(typeDef.type)}`;
     }
 
     if (/trcToken/.test(typeDef.type)) return typeDef.type.replace(/trcToken/, 'uint256');
