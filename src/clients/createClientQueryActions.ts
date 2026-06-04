@@ -17,6 +17,8 @@ import type {
     VerifyMessageParameters,
     VerifyTypedDataParameters,
     WaitForTransactionReceiptParameters,
+    EstimateContractGasFunctionName,
+    ReadContractFunctionName,
 } from './types.js';
 import type { ContractAbiInterface, EventFragment, FunctionFragment } from '../types/ABI.js';
 import type { Chain } from '../chains/index.js';
@@ -376,7 +378,7 @@ export function createClientQueryActions({
         },
         estimateContractGas: async <
             Abi extends ContractAbiInterface,
-            FunctionName extends EstimateContractGasParameters<Abi>['functionName'],
+            FunctionName extends EstimateContractGasFunctionName<Abi>,
         >({
             abi,
             account,
@@ -504,7 +506,7 @@ export function createClientQueryActions({
         },
         readContract: async <
             Abi extends ContractAbiInterface,
-            FunctionName extends ReadContractParameters<Abi>['functionName'],
+            FunctionName extends ReadContractFunctionName<Abi>,
         >({
             abi,
             account,

@@ -88,7 +88,7 @@ type IsWriteFunction<Fragment> = Fragment extends FunctionFragment
         : true
     : false;
 
-type ReadContractFunctionName<Abi extends ContractAbiInterface> = Abi[number] extends infer Fragment
+export type ReadContractFunctionName<Abi extends ContractAbiInterface> = Abi[number] extends infer Fragment
     ? Fragment extends FunctionFragment
         ? IsReadOnlyFunction<Fragment> extends true
             ? Fragment['name']
@@ -96,7 +96,7 @@ type ReadContractFunctionName<Abi extends ContractAbiInterface> = Abi[number] ex
         : never
     : never;
 
-type EstimateContractGasFunctionName<Abi extends ContractAbiInterface> = Abi[number] extends infer Fragment
+export type EstimateContractGasFunctionName<Abi extends ContractAbiInterface> = Abi[number] extends infer Fragment
     ? Fragment extends FunctionFragment
         ? IsWriteFunction<Fragment> extends true
             ? Fragment['name']
@@ -155,7 +155,7 @@ type CollapseSingleItemTuple<Value> = Value extends readonly [infer Only] ? Only
 
 type IsNever<T> = [T] extends [never] ? true : false;
 
-type ChangeNeverToAnyArray<T> = IsNever<T> extends true ? ReadonlyArray<any> : T;
+type ChangeNeverToAnyArray<T> = IsNever<T> extends true ? any[] : T;
 
 type ChangeNeverToString<T> = IsNever<T> extends true ? string : T;
 

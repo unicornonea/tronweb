@@ -9,6 +9,7 @@ import type {
     SignTransactionParameters,
     WalletClient,
     WalletClientConfig,
+    WriteContractFunctionName,
     WriteContractParameters,
 } from './types.js';
 import type { WalletAccount } from '../accounts/types.js';
@@ -257,7 +258,7 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
 
     const writeContract = async <
         Abi extends ContractAbiInterface,
-        FunctionName extends WriteContractParameters<Abi>['functionName'],
+        FunctionName extends WriteContractFunctionName<Abi>,
     >({
         address,
         abi,
