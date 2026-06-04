@@ -1991,6 +1991,17 @@ describe('TronWeb.transactionBuilder', function () {
             }
         });
 
+        it('falls back to the default feeLimit when feeLimit is 0 (legacy idiom)', async function () {
+            // Pre-refactor `options.feeLimit || this.tronWeb.feeLimit` rescued a falsy feeLimit;
+            // a falsy-but-present feeLimit must still default rather than throw.
+            const tx = await tronWeb.transactionBuilder.createSmartContract({
+                abi: testRevert.abi,
+                bytecode: testRevert.bytecode,
+                feeLimit: 0,
+            });
+            assert.equal(tx.raw_data.fee_limit, tronWeb.feeLimit);
+        });
+
         it('should create a smart contract with array parameters', async function () {
             this.timeout(20000);
             const bals = [1000, 2000, 3000, 4000];
@@ -2144,6 +2155,52 @@ describe('TronWeb.transactionBuilder', function () {
                 assert.isTrue(transaction.receipt.result);
                 assert.equal(transaction.transaction.raw_data.contract[0].Permission_id || 0, options.permissionId || 0);
             }
+        });
+
+        it('maps the 5th positional arg to params and defaults the issuer (legacy form)', async function () {
+            this.timeout(20000);
+
+            const functionSelector = 'testPure(uint256,uint256)';
+            const parameter = [
+                { type: 'uint256', value: 1 },
+                { type: 'uint256', value: 2 },
+            ];
+            // Legacy positional form: (addr, selector, feeLimit, callValue, parametersArray).
+            // The 5th arg must become `parameters` and the issuer must default — not the
+            // other way around (which dropped the params and misrouted the issuer).
+            const tx: any = await tronWeb.transactionBuilder.triggerSmartContract(
+                contractAddress,
+                functionSelector,
+                tronWeb.feeLimit as any,
+                0 as any,
+                parameter as any
+            );
+
+            assert.isTrue(tx.result.result);
+            const value = tx.transaction.raw_data.contract[0].parameter.value;
+            // issuer defaulted to the instance address, not derived from the params array
+            assert.equal(String(value.owner_address).toLowerCase(), String(tronWeb.defaultAddress.hex).toLowerCase());
+            // params were encoded (4-byte selector + two 32-byte args), not dropped
+            assert.isString(value.data);
+            assert.isAbove(value.data.length, 8);
+        });
+
+        it('falls back to the default feeLimit when triggerSmartContract feeLimit is 0', async function () {
+            this.timeout(20000);
+
+            // A falsy feeLimit must default (pre-refactor `options.feeLimit || tronWeb.feeLimit`),
+            // not override the injected default and fail validation.
+            const tx: any = await tronWeb.transactionBuilder.triggerSmartContract(
+                contractAddress,
+                'testPure(uint256,uint256)',
+                { feeLimit: 0 },
+                [
+                    { type: 'uint256', value: 1 },
+                    { type: 'uint256', value: 2 },
+                ],
+                accounts.hex[6]
+            );
+            assert.equal(tx.transaction.raw_data.fee_limit, tronWeb.feeLimit);
         });
     });
 
