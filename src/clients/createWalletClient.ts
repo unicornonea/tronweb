@@ -77,6 +77,42 @@ const SEND_TRANSACTION_ALLOWED: ReadonlySet<SendTransactionType> = new Set([
     'addUpdateData',
 ]);
 
+// Index of the options object (which carries `feeLimit`) within the positional
+// `parameters` array passed to sendTransaction, for the contract-building actions
+// whose validator requires `feeLimit > 0`. The typed writeContract/deployContract
+// helpers inject the client feeLimit themselves; the generic dispatcher must do the
+// same, otherwise a bare sendTransaction({ type: 'createSmartContract', parameters:
+// [...] }) with no feeLimit throws "Invalid feeLimit provided".
+const FEE_LIMIT_OPTIONS_INDEX: Partial<Record<SendTransactionType, number>> = {
+    createSmartContract: 0,
+    triggerSmartContract: 2,
+    triggerConstantContract: 2,
+    triggerConfirmedConstantContract: 2,
+    estimateEnergy: 2,
+};
+
+// Merge the client's default feeLimit into the options arg when the caller omitted it
+// (or passed a falsy 0). Mirrors the legacy `options.feeLimit || tronWeb.feeLimit` fallback.
+function applyDefaultFeeLimit(
+    type: SendTransactionType,
+    parameters: readonly unknown[],
+    feeLimit: number
+): readonly unknown[] {
+    const optionsIndex = FEE_LIMIT_OPTIONS_INDEX[type];
+    if (optionsIndex === undefined) return parameters;
+
+    const options = parameters[optionsIndex];
+    // Only inject into a plain options object; leave unexpected shapes for the action to validate.
+    if (options !== undefined && (typeof options !== 'object' || options === null || Array.isArray(options))) {
+        return parameters;
+    }
+
+    const current = options as { feeLimit?: number } | undefined;
+    const next = parameters.slice();
+    next[optionsIndex] = { ...current, feeLimit: current?.feeLimit || feeLimit };
+    return next;
+}
+
 function isReadOnlyFunctionFragment(fragment: FunctionFragment): boolean {
     const stateMutability = (fragment.stateMutability ?? '').toLowerCase();
     return stateMutability === 'view' || stateMutability === 'pure' || fragment.constant === true;
@@ -175,7 +211,7 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
         const prefix: unknown[] = [fullNode];
         if (SEND_TRANSACTION_NEEDS_SOLIDITY.has(type)) prefix.push(solidityNode);
         if (SEND_TRANSACTION_NEEDS_CACHE.has(type)) prefix.push(contractCache);
-        return fn(...prefix, ...parameters);
+        return fn(...prefix, ...applyDefaultFeeLimit(type, parameters, feeLimit));
     };
 
     const sendTransaction = async <K extends SendTransactionType>(

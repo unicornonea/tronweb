@@ -668,6 +668,75 @@ describe('client factories', function () {
         );
     });
 
+    it('defaults feeLimit for contract-building types dispatched via generic sendTransaction', async function () {
+        const stubAccount = {
+            ...account,
+            async signTransaction(transaction: any) {
+                return { ...transaction, signature: ['0xsignature'] };
+            },
+        };
+        const fullNode = makeMockProvider('fullNode');
+        const solidityNode = makeMockProvider('solidityNode');
+        fullNode.mock('wallet/triggersmartcontract', (args: any) => {
+            const tx = {
+                visible: false,
+                raw_data: {
+                    contract: [
+                        {
+                            parameter: {
+                                value: {
+                                    contract_address: args.contract_address,
+                                    owner_address: args.owner_address,
+                                    call_value: args.call_value,
+                                    ...(args.data ? { data: args.data } : {}),
+                                    ...(args.function_selector ? { function_selector: args.function_selector } : {}),
+                                    ...(args.parameter ? { parameter: args.parameter } : {}),
+                                },
+                                type_url: 'type.googleapis.com/protocol.TriggerSmartContract',
+                            },
+                            type: 'TriggerSmartContract',
+                        },
+                    ],
+                    ref_block_bytes: '0001',
+                    ref_block_hash: '0000000000000000',
+                    expiration: Date.now() + 60_000,
+                    timestamp: Date.now(),
+                    fee_limit: args.fee_limit,
+                },
+            };
+            const pb = txJsonToPb(tx as any);
+            return {
+                result: { result: true },
+                transaction: { ...tx, txID: txPbToTxID(pb).replace(/^0x/, ''), raw_data_hex: txPbToRawDataHex(pb).toLowerCase() },
+            };
+        });
+        fullNode.mock('wallet/broadcasttransaction', (signed: any) => ({ txid: signed.txID, code: 0, result: true }));
+        const walletClient = createWalletClient({
+            account: stubAccount,
+            fullNode: fullNode.provider,
+            solidityNode: solidityNode.provider,
+        });
+
+        // Issue #2: omitting feeLimit in the raw options must fall back to the client default
+        // (150_000_000) instead of throwing "Invalid feeLimit provided". Drive triggerSmartContract
+        // through the generic dispatcher (the same path writeContract uses, minus the feeLimit).
+        const triggerOptions = { funcABIV2: testWriteContractAbi[0], parametersV2: [account.address, 12] };
+        await walletClient.sendTransaction({
+            type: 'triggerSmartContract',
+            parameters: [contractAddress, 'transfer(address,uint256)', { ...triggerOptions }, [], account.address],
+        } as any);
+        const defaulted = fullNode.calls.filter((c) => c.url === 'wallet/triggersmartcontract').pop();
+        assert.equal(defaulted!.params.fee_limit, 150_000_000);
+
+        // An explicitly provided feeLimit is preserved (not overridden by the default).
+        await walletClient.sendTransaction({
+            type: 'triggerSmartContract',
+            parameters: [contractAddress, 'transfer(address,uint256)', { ...triggerOptions, feeLimit: 7_777 }, [], account.address],
+        } as any);
+        const explicit = fullNode.calls.filter((c) => c.url === 'wallet/triggersmartcontract').pop();
+        assert.equal(explicit!.params.fee_limit, 7_777);
+    });
+
     it('throws when sendTransaction broadcast returns an error code', async function () {
         const stubAccount = {
             ...account,
