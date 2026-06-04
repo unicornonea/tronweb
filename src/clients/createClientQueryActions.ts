@@ -24,7 +24,7 @@ import type { EventResponse } from '../types/Event.js';
 import type { Hex, SignableMessage } from '../accounts/types.js';
 import type { TransactionWrapper } from '../types/Transaction.js';
 import type { HttpProvider } from '../lib/providers/index.js';
-import { decodeParamsV2ByABI } from '../utils/abi.js';
+import { buildFullTypeDefinition, decodeParamsV2ByABI } from '../utils/abi.js';
 import { hexToBytes, toUtf8 } from '../utils/bytes.js';
 import { toHex } from '../utils/address.js';
 import { verifyMessage as recoverMessageAddress } from '../utils/message.js';
@@ -85,7 +85,7 @@ function isWriteFunctionFragment(fragment: FunctionFragment): boolean {
 
 function buildFunctionSelector(fragment: FunctionFragment): string {
     const inputs = fragment.inputs ?? [];
-    return `${fragment.name}(${inputs.map((input) => input.type).join(',')})`;
+    return `${fragment.name}(${inputs.map((input) => buildFullTypeDefinition(input)).join(',')})`;
 }
 
 function resolveCallerAddress(account: string | undefined, defaultAddress?: string): string {

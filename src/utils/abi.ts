@@ -62,21 +62,21 @@ function extractArrayDim(type: string) {
     return (size.match(/\]\[/g) || []).length + 1;
 }
 
+export function buildFullTypeDefinition(typeDef: AbiParamsCommon): string {
+    if (typeDef && typeDef.type.indexOf('tuple') === 0 && typeDef.components) {
+        const innerTypes = typeDef.components.map((innerType: AbiParamsCommon) => {
+            return buildFullTypeDefinition(innerType);
+        });
+        return `tuple(${innerTypes.join(',')})${extractSize(typeDef.type)}`;
+    }
+
+    if (/trcToken/.test(typeDef.type)) return typeDef.type.replace(/trcToken/, 'uint256');
+
+    return typeDef.type;
+}
+
 export function encodeParamsV2ByABI(funABI: FunctionFragment, args: any[]) {
     const types: string[] = [];
-
-    const buildFullTypeDefinition = (typeDef: AbiParamsCommon): string => {
-        if (typeDef && typeDef.type.indexOf('tuple') === 0 && typeDef.components) {
-            const innerTypes = typeDef.components.map((innerType: AbiParamsCommon) => {
-                return buildFullTypeDefinition(innerType);
-            });
-            return `tuple(${innerTypes.join(',')})${extractSize(typeDef.type)}`;
-        }
-
-        if (/trcToken/.test(typeDef.type)) return typeDef.type.replace(/trcToken/, 'uint256');
-
-        return typeDef.type;
-    };
 
     const convertTypes = (types: string[]) => {
         for (let i = 0; i < types.length; i++) {

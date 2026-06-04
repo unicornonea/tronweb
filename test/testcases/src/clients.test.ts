@@ -115,6 +115,40 @@ describe('client factories', function () {
             ],
         },
     ] as const;
+    const testTupleReadContractAbi = [
+        {
+            type: 'function',
+            name: 'inspect',
+            stateMutability: 'view',
+            inputs: [
+                {
+                    name: 'payload',
+                    type: 'tuple',
+                    components: [
+                        { name: 'owner', type: 'address' },
+                        { name: 'amount', type: 'uint256' },
+                        {
+                            name: 'flags',
+                            type: 'tuple',
+                            components: [
+                                { name: 'approver', type: 'address' },
+                                { name: 'enabled', type: 'bool' },
+                            ],
+                        },
+                    ],
+                },
+                {
+                    name: 'history',
+                    type: 'tuple[]',
+                    components: [
+                        { name: 'account', type: 'address' },
+                        { name: 'amount', type: 'uint256' },
+                    ],
+                },
+            ],
+            outputs: [{ name: 'result', type: 'uint256' }],
+        },
+    ] as const;
 
     async function assertRejectsWithMessage(action: () => Promise<unknown>, message: string) {
         try {
@@ -370,6 +404,26 @@ describe('client factories', function () {
             ),
             '42'
         );
+
+        assert.equal(
+            String(
+                await publicClient.readContract({
+                    address: contractAddress,
+                    abi: testTupleReadContractAbi,
+                    functionName: 'inspect',
+                    args: [
+                        [account.address, 12, [secondAddress, true]],
+                        [[secondAddress, 34]],
+                    ],
+                    account: account.address,
+                })
+            ),
+            '42'
+        );
+        const tupleReadRequest = fullNode.calls.find(
+            (c) => c.params.function_selector === 'inspect(tuple(address,uint256,tuple(address,bool)),tuple(address,uint256)[])'
+        );
+        assert.isOk(tupleReadRequest);
 
         assert.equal(
             await publicClient.estimateContractGas({
