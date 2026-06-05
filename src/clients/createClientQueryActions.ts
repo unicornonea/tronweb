@@ -135,7 +135,7 @@ function normalizeReadContractOutput(fragment: FunctionFragment, data: Hex | und
     }
 
     const output = decodeParamsV2ByABI(fragment, data) as any[];
-    if (output.length === 1 && Object.keys(output).length === 1) {
+    if (output.length === 1) {
         return output[0];
     }
 
