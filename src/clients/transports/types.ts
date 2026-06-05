@@ -1,4 +1,4 @@
-import type { HeadersType } from '../types/Providers.js';
+import type { HeadersType } from '../../types/Providers.js';
 
 export interface HttpTransportOptions {
     headers?: HeadersType;

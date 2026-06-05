@@ -5,20 +5,20 @@ import type {
     SignMessageParameters,
     SignTypedDataParameters,
 } from './types.js';
-import type { SignedTransaction, Transaction } from '../types/Transaction.js';
-import type { ContractParamter } from '../types/Contract.js';
+import type { SignedTransaction, Transaction } from '../../types/Transaction.js';
+import type { ContractParamter } from '../../types/Contract.js';
 import {
     getPubKeyFromPriKey,
     getAddressFromPriKey,
     signTransaction as cryptoSignTransaction,
-} from '../utils/crypto.js';
-import { getBase58CheckAddress } from '../utils/crypto.js';
-import { toHex } from '../utils/address.js';
-import { signMessage as cryptoSignMessage } from '../utils/message.js';
-import { signTypedData as cryptoSignTypedData } from '../utils/typedData.js';
-import { txCheck } from '../utils/transaction.js';
-import { hexStr2byteArray, byteArray2hexStr } from '../utils/code.js';
-import { hexToBytes } from '../utils/bytes.js';
+} from '../../utils/crypto.js';
+import { getBase58CheckAddress } from '../../utils/crypto.js';
+import { toHex } from '../../utils/address.js';
+import { signMessage as cryptoSignMessage } from '../../utils/message.js';
+import { signTypedData as cryptoSignTypedData } from '../../utils/typedData.js';
+import { txCheck } from '../../utils/transaction.js';
+import { hexStr2byteArray, byteArray2hexStr } from '../../utils/code.js';
+import { hexToBytes } from '../../utils/bytes.js';
 
 function normalizePrivateKey(privateKey: string): Hex {
     if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey)) {

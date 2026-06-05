@@ -25,13 +25,13 @@ export { Plugin };
 import { TronWeb } from './tronweb.js';
 export { TronWeb };
 
-import { privateKeyToAccount } from './accounts/index.js';
+import { privateKeyToAccount } from './clients/accounts/index.js';
 export { privateKeyToAccount };
 
 import { defineChain, mainnet, nile, shasta } from './clients/chains.js';
 export { defineChain, mainnet, nile, shasta };
 
-import { http } from './transports/index.js';
+import { http } from './clients/transports/index.js';
 export { http };
 
 import { createContract, createPublicClient, createWalletClient, getContract } from './clients/index.js';
@@ -40,7 +40,7 @@ export { createContract, createPublicClient, createWalletClient, getContract };
 import * as Types from './types/index.js';
 export { Types };
 
-export type { Account } from './accounts/index.js';
+export type { Account } from './clients/accounts/index.js';
 export type { Chain } from './clients/chains.js';
 export type {
     ContractFunctions,
@@ -52,7 +52,7 @@ export type {
     WalletClient,
     WalletClientConfig,
 } from './clients/index.js';
-export type { HttpTransport, HttpTransportOptions, Transport } from './transports/index.js';
+export type { HttpTransport, HttpTransportOptions, Transport } from './clients/transports/index.js';
 
 export default {
     utils,

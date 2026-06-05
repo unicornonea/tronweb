@@ -1,6 +1,6 @@
-import { ContractParamter } from '../types/Contract.js';
-import type { SignedTransaction, Transaction } from '../types/Transaction.js';
-import type { TypedDataDomain, TypedDataField } from '../utils/typedData.js';
+import { ContractParamter } from '../../types/Contract.js';
+import type { SignedTransaction, Transaction } from '../../types/Transaction.js';
+import type { TypedDataDomain, TypedDataField } from '../../utils/typedData.js';
 
 export type Hex = `0x${string}`;
 export type ByteArray = Uint8Array;

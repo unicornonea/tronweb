@@ -2,8 +2,8 @@ import { HttpProvider } from '../lib/providers/index.js';
 import type { HeadersType } from '../types/Providers.js';
 import type { NodeProvider, TronWebOptions } from '../types/TronWeb.js';
 import type { Chain } from './chains.js';
-import { http } from '../transports/http.js';
-import type { HttpTransport, Transport } from '../transports/types.js';
+import { http } from './transports/http.js';
+import type { HttpTransport, Transport } from './transports/types.js';
 import { ADDRESS_PREFIX } from '../utils/constants.js';
 import { hexToBytes } from '../utils/bytes.js';
 import { toHex } from '../utils/address.js';
@@ -16,7 +16,7 @@ import type {
     VerifyMessageParameters,
     WaitForTransactionReceiptParameters,
 } from './types.js';
-import type { Hex, SignableMessage, WalletAccount } from '../accounts/types.js';
+import type { Hex, SignableMessage, WalletAccount } from './accounts/types.js';
 
 const DEFAULT_FEE_LIMIT = 150_000_000;
 const NULL_CALLER_ADDRESS = `${ADDRESS_PREFIX}${'0'.repeat(40)}`;

@@ -12,7 +12,7 @@ import type {
     WriteContractFunctionName,
     WriteContractParameters,
 } from './types.js';
-import type { WalletAccount } from '../accounts/types.js';
+import type { WalletAccount } from './accounts/types.js';
 import type { ContractAbiInterface, FunctionFragment } from '../types/ABI.js';
 import type { SignedTransaction, Transaction } from '../types/Transaction.js';
 import { createClientQueryActions } from './createClientQueryActions.js';

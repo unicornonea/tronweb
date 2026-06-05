@@ -18,7 +18,7 @@ import type {
 import type { ContractAbiInterface, EventFragment, FunctionFragment } from '../types/ABI.js';
 import type { Chain } from './chains.js';
 import type { EventResponse } from '../types/Event.js';
-import type { Hex } from '../accounts/types.js';
+import type { Hex } from './accounts/types.js';
 import type { TransactionWrapper } from '../types/Transaction.js';
 import type { HttpProvider } from '../lib/providers/index.js';
 import { buildFunctionSelector, decodeParamsV2ByABI, isReadOnlyFunctionFragment, resolveFunctionFragment } from '../utils/abi.js';

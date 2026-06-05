@@ -1,6 +1,6 @@
 import { assert } from 'chai';
 
-import { privateKeyToAccount } from '../../src/accounts/privateKeyToAccount.js';
+import { privateKeyToAccount } from '../../src/clients/accounts/privateKeyToAccount.js';
 import { createPublicClient } from '../../src/clients/createPublicClient.js';
 import { createWalletClient } from '../../src/clients/createWalletClient.js';
 import { getContract } from '../../src/clients/getContract.js';

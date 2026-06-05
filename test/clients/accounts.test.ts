@@ -1,6 +1,6 @@
 import { assert } from 'chai';
 
-import { privateKeyToAccount } from '../../src/accounts/privateKeyToAccount.js';
+import { privateKeyToAccount } from '../../src/clients/accounts/privateKeyToAccount.js';
 import { TronWeb } from '../../src/tronweb.js';
 import { toHex } from '../../src/utils/address.js';
 import { hexStr2byteArray } from '../../src/utils/code.js';

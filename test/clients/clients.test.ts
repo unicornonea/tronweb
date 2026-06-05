@@ -1,6 +1,6 @@
 import { assert } from 'chai';
 
-import { privateKeyToAccount } from '../../src/accounts/privateKeyToAccount.js';
+import { privateKeyToAccount } from '../../src/clients/accounts/privateKeyToAccount.js';
 import { fromHex, toHex } from '../../src/utils/address.js';
 import { sha3 } from '../../src/utils/crypto.js';
 import { encodeParams } from '../../src/utils/abi.js';

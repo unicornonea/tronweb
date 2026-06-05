@@ -7,7 +7,7 @@ import { TransactionBuilder } from '../../src/lib/TransactionBuilder/Transaction
 import * as tbActions from '../../src/lib/actions/transactionBuilder.js';
 import * as trxActions from '../../src/lib/actions/trx.js';
 import * as eventActions from '../../src/lib/actions/event.js';
-import { privateKeyToAccount } from '../../src/accounts/privateKeyToAccount.js';
+import { privateKeyToAccount } from '../../src/clients/accounts/privateKeyToAccount.js';
 import { createPublicClient } from '../../src/clients/createPublicClient.js';
 import { createWalletClient } from '../../src/clients/createWalletClient.js';
 import { HttpProvider } from '../../src/lib/providers/index.js';
