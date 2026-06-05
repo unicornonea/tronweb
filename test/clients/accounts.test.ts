@@ -1,14 +1,14 @@
 import { assert } from 'chai';
 
-import { privateKeyToAccount } from '../../../src/accounts/privateKeyToAccount.js';
-import { TronWeb } from '../../../src/tronweb.js';
-import { toHex } from '../../../src/utils/address.js';
-import { hexStr2byteArray } from '../../../src/utils/code.js';
-import { ADDRESS_PREFIX } from '../../../src/utils/constants.js';
-import { ecRecover, getBase58CheckAddress } from '../../../src/utils/crypto.js';
-import { verifyMessage } from '../../../src/utils/message.js';
-import { txJsonToPb, txPbToRawDataHex, txPbToTxID } from '../../../src/utils/transaction.js';
-import { verifyTypedData } from '../../../src/utils/typedData.js';
+import { privateKeyToAccount } from '../../src/accounts/privateKeyToAccount.js';
+import { TronWeb } from '../../src/tronweb.js';
+import { toHex } from '../../src/utils/address.js';
+import { hexStr2byteArray } from '../../src/utils/code.js';
+import { ADDRESS_PREFIX } from '../../src/utils/constants.js';
+import { ecRecover, getBase58CheckAddress } from '../../src/utils/crypto.js';
+import { verifyMessage } from '../../src/utils/message.js';
+import { txJsonToPb, txPbToRawDataHex, txPbToTxID } from '../../src/utils/transaction.js';
+import { verifyTypedData } from '../../src/utils/typedData.js';
 
 describe('privateKeyToAccount', function () {
     const privateKey = `0x${'1'.padStart(64, '0')}` as `0x${string}`;

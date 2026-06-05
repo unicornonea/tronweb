@@ -2,7 +2,7 @@ import { HttpProvider } from '../lib/providers/index.js';
 import type { PublicClient, PublicClientConfig } from './types.js';
 import { createClientMetadata } from './createClientMetadata.js';
 import { createClientQueryActions } from './createClientQueryActions.js';
-import { resolveClientProviders } from './resolveClientConfig.js';
+import { resolveClientProviders } from './resolvers.js';
 
 /**
  * Create a read-only client.

@@ -1,16 +1,16 @@
 import { assert } from 'chai';
 
-import { privateKeyToAccount } from '../../../src/accounts/privateKeyToAccount.js';
-import { createPublicClient } from '../../../src/clients/createPublicClient.js';
-import { createWalletClient } from '../../../src/clients/createWalletClient.js';
-import { getContract } from '../../../src/clients/getContract.js';
-import { HttpProvider } from '../../../src/lib/providers/index.js';
-import * as tbActions from '../../../src/lib/actions/transactionBuilder.js';
-import * as trxActions from '../../../src/lib/actions/trx.js';
-import tronWebBuilder from '../../helpers/tronWebBuilder.js';
-import wait from '../../helpers/wait.js';
-import config from '../../helpers/config.js';
-import { trcTokenOverloadAbi, trcTokenOverloadBytecode } from '../../fixtures/trcTokenOverload.js';
+import { privateKeyToAccount } from '../../src/accounts/privateKeyToAccount.js';
+import { createPublicClient } from '../../src/clients/createPublicClient.js';
+import { createWalletClient } from '../../src/clients/createWalletClient.js';
+import { getContract } from '../../src/clients/getContract.js';
+import { HttpProvider } from '../../src/lib/providers/index.js';
+import * as tbActions from '../../src/lib/actions/transactionBuilder.js';
+import * as trxActions from '../../src/lib/actions/trx.js';
+import tronWebBuilder from '../helpers/tronWebBuilder.js';
+import wait from '../helpers/wait.js';
+import config from '../helpers/config.js';
+import { trcTokenOverloadAbi, trcTokenOverloadBytecode } from '../fixtures/trcTokenOverload.js';
 
 const { FULL_NODE_API } = config;
 const ABI = trcTokenOverloadAbi;

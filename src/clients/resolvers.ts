@@ -120,3 +120,15 @@ export function resolveClientProviders(config: ClientConfigWithTransport): Resol
         feeLimit: DEFAULT_FEE_LIMIT,
     };
 }
+
+export function resolveCallValue(value: number | bigint | undefined): number | undefined {
+    if (value === undefined) return undefined;
+    if (typeof value === 'bigint') {
+        // Number(bigint) silently loses precision above 2^53; reject rather than truncate.
+        if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+            throw new Error('call value exceeds safe integer range');
+        }
+        return Number(value);
+    }
+    return value;
+}

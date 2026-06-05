@@ -36,6 +36,7 @@ import { parseEvent } from '../utils/validations.js';
 import * as trxActions from '../lib/actions/trx.js';
 import * as tbActions from '../lib/actions/transactionBuilder.js';
 import * as eventActions from '../lib/actions/event.js';
+import { resolveCallValue } from './resolvers.js';
 
 export interface CreateClientQueryActionsOptions {
     readonly chain?: Chain;
@@ -89,18 +90,6 @@ function resolveCallerAddress(account: string | undefined, defaultAddress?: stri
     if (typeof account === 'string' && account.length > 0) return account;
     if (typeof defaultAddress === 'string' && defaultAddress.length > 0) return defaultAddress;
     return NULL_CALLER_ADDRESS;
-}
-
-function resolveCallValue(value: number | bigint | undefined): number | undefined {
-    if (value === undefined) return undefined;
-    if (typeof value === 'bigint') {
-        // Number(bigint) silently loses precision above 2^53; reject rather than truncate.
-        if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
-            throw new Error('call value exceeds safe integer range');
-        }
-        return Number(value);
-    }
-    return value;
 }
 
 function extractConstantResultData(transaction: TransactionWrapper): Hex | undefined {

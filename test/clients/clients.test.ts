@@ -1,21 +1,21 @@
 import { assert } from 'chai';
 
-import { privateKeyToAccount } from '../../../src/accounts/privateKeyToAccount.js';
-import { fromHex, toHex } from '../../../src/utils/address.js';
-import { sha3 } from '../../../src/utils/crypto.js';
-import { encodeParams } from '../../../src/utils/abi.js';
-import { createPublicClient } from '../../../src/clients/createPublicClient.js';
-import { createWalletClient } from '../../../src/clients/createWalletClient.js';
-import { getContract } from '../../../src/clients/getContract.js';
-import { Trx } from '../../../src/lib/trx.js';
-import { HttpProvider } from '../../../src/lib/providers/index.js';
-import { mainnet, nile, shasta } from '../../../src/chains/index.js';
-import * as tbActions from '../../../src/lib/actions/transactionBuilder.js';
-import * as trxActions from '../../../src/lib/actions/trx.js';
-import tronWebBuilder from '../../helpers/tronWebBuilder.js';
-import wait from '../../helpers/wait.js';
-import config from '../../helpers/config.js';
-import Contracts from '../../fixtures/contracts.js';
+import { privateKeyToAccount } from '../../src/accounts/privateKeyToAccount.js';
+import { fromHex, toHex } from '../../src/utils/address.js';
+import { sha3 } from '../../src/utils/crypto.js';
+import { encodeParams } from '../../src/utils/abi.js';
+import { createPublicClient } from '../../src/clients/createPublicClient.js';
+import { createWalletClient } from '../../src/clients/createWalletClient.js';
+import { getContract } from '../../src/clients/getContract.js';
+import { Trx } from '../../src/lib/trx.js';
+import { HttpProvider } from '../../src/lib/providers/index.js';
+import { mainnet, nile, shasta } from '../../src/chains/index.js';
+import * as tbActions from '../../src/lib/actions/transactionBuilder.js';
+import * as trxActions from '../../src/lib/actions/trx.js';
+import tronWebBuilder from '../helpers/tronWebBuilder.js';
+import wait from '../helpers/wait.js';
+import config from '../helpers/config.js';
+import Contracts from '../fixtures/contracts.js';
 import {
     createContract as createContractFromRoot,
     createPublicClient as createPublicClientFromRoot,
@@ -26,9 +26,9 @@ import {
     mainnet as mainnetFromRoot,
     nile as nileFromRoot,
     shasta as shastaFromRoot,
-} from '../../../src/index.js';
-import liveConfig from '../../helpers/config.js';
-import { trcTokenOverloadAbi, trcTokenOverloadBytecode } from '../../fixtures/trcTokenOverload.js';
+} from '../../src/index.js';
+import liveConfig from '../helpers/config.js';
+import { trcTokenOverloadAbi, trcTokenOverloadBytecode } from '../fixtures/trcTokenOverload.js';
 
 const { FULL_NODE_API } = config;
 
