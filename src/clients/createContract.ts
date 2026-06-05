@@ -184,9 +184,14 @@ function getFunctionParameters(values: [argsOrOptions?: readonly unknown[] | obj
     return { args, options };
 }
 
-function isEventOptions(value: unknown): boolean {
+function isEventOptions(value: unknown, fragment: EventFragment): boolean {
     if (!value || Array.isArray(value) || typeof value !== 'object') return false;
-    return Object.keys(value).every((key) => EVENT_OPTION_KEYS.has(key));
+    const inputNames = new Set((fragment.inputs ?? []).map((input) => input.name).filter(Boolean) as string[]);
+    const keys = Object.keys(value);
+    // Treat the object as paging options only when every key is an option key AND none collides
+    // with an indexed ABI input name — a collision (e.g. an event with an indexed `limit`) means
+    // the caller is filtering by that input, so it must be read as args, not paging options.
+    return keys.every((key) => EVENT_OPTION_KEYS.has(key)) && !keys.some((key) => inputNames.has(key));
 }
 
 function normalizeEventArgs(fragment: EventFragment, args: readonly unknown[] | Record<string, unknown> | undefined) {
@@ -212,7 +217,7 @@ function getEventParameters(
     fragment: EventFragment
 ) {
     const first = values[0];
-    const hasArgs = values[1] !== undefined || Array.isArray(first) || (Boolean(first) && typeof first === 'object' && !isEventOptions(first));
+    const hasArgs = values[1] !== undefined || Array.isArray(first) || (Boolean(first) && typeof first === 'object' && !isEventOptions(first, fragment));
     const args = hasArgs ? normalizeEventArgs(fragment, first as readonly unknown[] | Record<string, unknown> | undefined) : undefined;
     const options = (hasArgs ? values[1] : first) ?? {};
     return { args, options };
