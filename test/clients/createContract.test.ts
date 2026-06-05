@@ -1,17 +1,17 @@
 import { assert } from 'chai';
 
-import { privateKeyToAccount } from '../../../src/accounts/privateKeyToAccount.js';
-import { createContract, getContract } from '../../../src/clients/getContract.js';
-import { createPublicClient } from '../../../src/clients/createPublicClient.js';
-import { createWalletClient } from '../../../src/clients/createWalletClient.js';
-import { HttpProvider } from '../../../src/lib/providers/index.js';
-import { toHex } from '../../../src/utils/address.js';
-import * as tbActions from '../../../src/lib/actions/transactionBuilder.js';
-import * as trxActions from '../../../src/lib/actions/trx.js';
-import tronWebBuilder from '../../helpers/tronWebBuilder.js';
-import wait from '../../helpers/wait.js';
-import config from '../../helpers/config.js';
-import Contracts from '../../fixtures/contracts.js';
+import { privateKeyToAccount } from '../../src/accounts/privateKeyToAccount.js';
+import { createContract, getContract } from '../../src/clients/getContract.js';
+import { createPublicClient } from '../../src/clients/createPublicClient.js';
+import { createWalletClient } from '../../src/clients/createWalletClient.js';
+import { HttpProvider } from '../../src/lib/providers/index.js';
+import { toHex } from '../../src/utils/address.js';
+import * as tbActions from '../../src/lib/actions/transactionBuilder.js';
+import * as trxActions from '../../src/lib/actions/trx.js';
+import tronWebBuilder from '../helpers/tronWebBuilder.js';
+import wait from '../helpers/wait.js';
+import config from '../helpers/config.js';
+import Contracts from '../fixtures/contracts.js';
 
 const { FULL_NODE_API } = config;
 
