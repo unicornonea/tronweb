@@ -5,29 +5,24 @@ import type {
     EstimateContractGasReturnType,
     GetContractEventsParameters,
     GetContractEventsReturnType,
-    GetBlockParameters,
-    GetBlockTransactionCountParameters,
     GetLogsParameters,
     GetLogsReturnType,
     ReadContractParameters,
     ReadContractReturnType,
-    GetTransactionParameters,
-    GetTransactionReceiptParameters,
     PublicClientActions,
     VerifyMessageParameters,
     VerifyTypedDataParameters,
-    WaitForTransactionReceiptParameters,
     EstimateContractGasFunctionName,
     ReadContractFunctionName,
 } from './types.js';
 import type { ContractAbiInterface, EventFragment, FunctionFragment } from '../types/ABI.js';
 import type { Chain } from './chains.js';
 import type { EventResponse } from '../types/Event.js';
-import type { Hex, SignableMessage } from '../accounts/types.js';
+import type { Hex } from '../accounts/types.js';
 import type { TransactionWrapper } from '../types/Transaction.js';
 import type { HttpProvider } from '../lib/providers/index.js';
 import { buildFunctionSelector, decodeParamsV2ByABI, resolveFunctionFragment } from '../utils/abi.js';
-import { hexToBytes, toUtf8 } from '../utils/bytes.js';
+import { toUtf8 } from '../utils/bytes.js';
 import { toHex } from '../utils/address.js';
 import { verifyMessage as recoverMessageAddress } from '../utils/message.js';
 import { verifyTypedData as recoverTypedDataAddress } from '../utils/typedData.js';
@@ -36,7 +31,18 @@ import { parseEvent } from '../utils/validations.js';
 import * as trxActions from '../lib/actions/trx.js';
 import * as tbActions from '../lib/actions/transactionBuilder.js';
 import * as eventActions from '../lib/actions/event.js';
-import { resolveCallValue } from './resolvers.js';
+import {
+    resolveCallerAddress,
+    resolveCallValue,
+    resolveMessageInput,
+    resolveAddressInput,
+    resolveBlockInput,
+    resolveBlockHashInput,
+    resolveBlockNumberInput,
+    resolveTransactionInput,
+    resolveBlockTransactionCountInput,
+    resolveTransactionHashInput,
+} from './resolvers.js';
 
 export interface CreateClientQueryActionsOptions {
     readonly chain?: Chain;
@@ -45,32 +51,6 @@ export interface CreateClientQueryActionsOptions {
     readonly eventServer?: HttpProvider;
     readonly feeLimit: number;
     readonly defaultAddress?: string;
-}
-
-const NULL_CALLER_ADDRESS = `${ADDRESS_PREFIX}${'0'.repeat(40)}`;
-
-function normalizeRawMessage(raw: Hex | Uint8Array): Uint8Array {
-    if (raw instanceof Uint8Array) return raw;
-    if (!/^0x[0-9a-fA-F]+$/.test(raw)) {
-        throw new Error('Invalid raw message: must be a 0x-prefixed hex string or Uint8Array');
-    }
-    // raw.length includes the even-length '0x' prefix, so its parity matches the hex digit count.
-    if (raw.length % 2 !== 0) {
-        throw new Error('Invalid raw message: hex string must have an even number of digits');
-    }
-    return hexToBytes(raw.slice(2));
-}
-
-function isRawMessageInput(
-    message: VerifyMessageParameters['message']
-): message is Extract<SignableMessage, { readonly raw: Hex | Uint8Array }> {
-    return typeof message === 'object' && message !== null && !Array.isArray(message) && 'raw' in message;
-}
-
-function resolveMessageInput(message: VerifyMessageParameters['message']): string | Uint8Array {
-    if (typeof message === 'string') return message;
-    if (isRawMessageInput(message)) return normalizeRawMessage(message.raw);
-    throw new Error('Invalid message input');
 }
 
 function isTransactionInfoPopulated(value: unknown): boolean {
@@ -84,12 +64,6 @@ function isReadOnlyFunctionFragment(fragment: FunctionFragment): boolean {
 
 function isWriteFunctionFragment(fragment: FunctionFragment): boolean {
     return !isReadOnlyFunctionFragment(fragment);
-}
-
-function resolveCallerAddress(account: string | undefined, defaultAddress?: string): string {
-    if (typeof account === 'string' && account.length > 0) return account;
-    if (typeof defaultAddress === 'string' && defaultAddress.length > 0) return defaultAddress;
-    return NULL_CALLER_ADDRESS;
 }
 
 function extractConstantResultData(transaction: TransactionWrapper): Hex | undefined {
@@ -233,114 +207,6 @@ function matchesContractEventArgs(
 
         return String(actual) === String(expected);
     });
-}
-
-function resolveAddressInput(
-    input: Parameters<PublicClientActions['getAccount']>[0] | Parameters<PublicClientActions['getBalance']>[0],
-    methodName: 'getAccount' | 'getBalance',
-    defaultAddress?: string
-): string {
-    // No explicit address → fall back to the configured (wallet) address, matching legacy
-    // trx.getAccount/getBalance(address = tronWeb.defaultAddress.hex).
-    if (input === undefined && typeof defaultAddress === 'string' && defaultAddress.length > 0) {
-        return defaultAddress;
-    }
-    if (input === undefined || input === false || typeof input === 'string') return input as string;
-    if (!('address' in input) || typeof input.address !== 'string') {
-        throw new Error(`${methodName} requires either an address string or { address }.`);
-    }
-    return input.address;
-}
-
-function resolveBlockInput(
-    input: Parameters<PublicClientActions['getBlock']>[0]
-): 'earliest' | 'latest' | number | string | false {
-    if (input === undefined) return 'latest';
-    if (input === false || typeof input === 'string' || typeof input === 'number') return input;
-
-    const parameters = input as GetBlockParameters;
-    const entries = [
-        ['blockHash', parameters.blockHash],
-        ['blockNumber', parameters.blockNumber],
-        ['blockTag', parameters.blockTag],
-    ].filter(([, value]) => value !== undefined);
-
-    if (entries.length !== 1) {
-        throw new Error('getBlock requires exactly one of blockHash, blockNumber, or blockTag when using object-style input.');
-    }
-
-    return entries[0][1] as 'earliest' | 'latest' | number | string;
-}
-
-function resolveBlockTransactionCountInput(
-    input: GetBlockTransactionCountParameters | undefined
-): 'earliest' | 'latest' | number | string | false {
-    if (!input) return 'latest';
-
-    const entries = [
-        ['blockHash', input.blockHash],
-        ['blockNumber', input.blockNumber],
-        ['blockTag', input.blockTag],
-    ].filter(([, value]) => value !== undefined);
-
-    if (entries.length === 0) return 'latest';
-
-    if (entries.length !== 1) {
-        throw new Error('getBlockTransactionCount requires at most one of blockHash, blockNumber, or blockTag.');
-    }
-
-    return entries[0][1] as 'earliest' | 'latest' | number | string;
-}
-
-function resolveBlockHashInput(input: Parameters<PublicClientActions['getBlockByHash']>[0]): string {
-    if (typeof input === 'string') return input;
-    if (!('blockHash' in input) || typeof input.blockHash !== 'string') {
-        throw new Error('getBlockByHash requires either a block hash string or { blockHash }.');
-    }
-    return input.blockHash;
-}
-
-function resolveBlockNumberInput(input: Parameters<PublicClientActions['getBlockByNumber']>[0]): number {
-    if (typeof input === 'number') return input;
-    if (!('blockNumber' in input) || typeof input.blockNumber !== 'number') {
-        throw new Error('getBlockByNumber requires either a block number or { blockNumber }.');
-    }
-    return input.blockNumber;
-}
-
-function resolveTransactionInput(
-    input:
-        | Parameters<PublicClientActions['getTransaction']>[0]
-        | Parameters<PublicClientActions['getTransactionInfo']>[0]
-        | Parameters<PublicClientActions['getTransactionReceipt']>[0]
-        | WaitForTransactionReceiptParameters,
-    methodName: 'getTransaction' | 'getTransactionInfo' | 'getTransactionReceipt' | 'waitForTransactionReceipt'
-): string {
-    if (typeof input === 'string') return input;
-
-    const parameters = input as GetTransactionParameters;
-    const transactionId = parameters.txId ?? parameters.hash;
-
-    if (typeof transactionId !== 'string') {
-        throw new Error(`${methodName} requires either a transaction id string or { txId } / { hash }.`);
-    }
-
-    if (parameters.txId && parameters.hash && parameters.txId !== parameters.hash) {
-        throw new Error(`${methodName} received conflicting txId and hash values.`);
-    }
-
-    return transactionId;
-}
-
-function resolveTransactionHashInput(
-    input: GetTransactionReceiptParameters | WaitForTransactionReceiptParameters,
-    methodName: 'getTransactionReceipt' | 'waitForTransactionReceipt'
-): string {
-    if (!input || typeof input.hash !== 'string') {
-        throw new Error(`${methodName} requires { hash }.`);
-    }
-
-    return input.hash;
 }
 
 export function createClientQueryActions({
