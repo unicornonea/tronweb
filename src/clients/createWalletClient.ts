@@ -18,7 +18,7 @@ import type { SignedTransaction, Transaction } from '../types/Transaction.js';
 import { createClientQueryActions } from './createClientQueryActions.js';
 import { createClientMetadata } from './createClientMetadata.js';
 import { resolveClientProviders, resolveCallValue, resolveSignerAddress } from './resolvers.js';
-import { buildFunctionSelector, resolveFunctionFragment } from '../utils/abi.js';
+import { buildFunctionSelector, isReadOnlyFunctionFragment, resolveFunctionFragment } from '../utils/abi.js';
 import * as tbActions from '../lib/actions/transactionBuilder.js';
 import * as trxActions from '../lib/actions/trx.js';
 
@@ -121,11 +121,6 @@ function applyDefaultFeeLimit(
     const next = parameters.slice();
     next[optionsIndex] = { ...current, feeLimit: current?.feeLimit || feeLimit };
     return next;
-}
-
-function isReadOnlyFunctionFragment(fragment: FunctionFragment): boolean {
-    const stateMutability = (fragment.stateMutability ?? '').toLowerCase();
-    return stateMutability === 'view' || stateMutability === 'pure' || fragment.constant === true;
 }
 
 function getWriteContractFragment<

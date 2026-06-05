@@ -164,6 +164,11 @@ export function resolveFunctionFragment(
     );
 }
 
+export function isReadOnlyFunctionFragment(fragment: FunctionFragment): boolean {
+    const stateMutability = (fragment.stateMutability ?? '').toLowerCase();
+    return stateMutability === 'view' || stateMutability === 'pure' || fragment.constant === true;
+}
+
 export function encodeParamsV2ByABI(funABI: FunctionFragment, args: any[]) {
     const types: string[] = [];
 

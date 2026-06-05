@@ -11,7 +11,7 @@ import type {
     WriteContractParameters,
     WriteContractReturnType,
 } from './types.js';
-import { overloadArities } from '../utils/abi.js';
+import { isReadOnlyFunctionFragment, overloadArities } from '../utils/abi.js';
 
 // ─── Helper types ────────────────────────────────────────────────────────────
 
@@ -164,14 +164,6 @@ const EVENT_OPTION_KEYS = new Set([
     'onlyUnconfirmed',
     'orderBy',
 ]);
-
-function isReadOnly(fragment: FunctionFragment): boolean {
-    const sm = (fragment.stateMutability ?? '').toLowerCase();
-    if (sm === 'view' || sm === 'pure') return true;
-    // Legacy ABI format uses `constant: true` for view/pure
-    if (fragment.constant === true) return true;
-    return false;
-}
 
 function isWalletClient(client: ContractFunctionClient): client is WalletClient {
     return 'account' in client && typeof (client as WalletClient).sendTransaction === 'function';
@@ -350,7 +342,7 @@ export function getContract<Abi extends ContractAbiInterface, TClient extends Co
             const name = fragment.name;
             const writeFunctionName = name as WriteFunctionName<Abi>;
             const readFunctionName = name as ReadFunctionName<Abi>;
-            const readOnly = isReadOnly(fragment as FunctionFragment);
+            const readOnly = isReadOnlyFunctionFragment(fragment as FunctionFragment);
 
             if (readOnly) {
                 read[name] = (

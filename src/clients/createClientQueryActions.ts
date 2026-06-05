@@ -21,7 +21,7 @@ import type { EventResponse } from '../types/Event.js';
 import type { Hex } from '../accounts/types.js';
 import type { TransactionWrapper } from '../types/Transaction.js';
 import type { HttpProvider } from '../lib/providers/index.js';
-import { buildFunctionSelector, decodeParamsV2ByABI, resolveFunctionFragment } from '../utils/abi.js';
+import { buildFunctionSelector, decodeParamsV2ByABI, isReadOnlyFunctionFragment, resolveFunctionFragment } from '../utils/abi.js';
 import { toUtf8 } from '../utils/bytes.js';
 import { toHex } from '../utils/address.js';
 import { verifyMessage as recoverMessageAddress } from '../utils/message.js';
@@ -55,11 +55,6 @@ export interface CreateClientQueryActionsOptions {
 
 function isTransactionInfoPopulated(value: unknown): boolean {
     return Boolean(value) && typeof value === 'object' && Object.keys(value as object).length > 0;
-}
-
-function isReadOnlyFunctionFragment(fragment: FunctionFragment): boolean {
-    const stateMutability = (fragment.stateMutability ?? '').toLowerCase();
-    return stateMutability === 'view' || stateMutability === 'pure' || fragment.constant === true;
 }
 
 function isWriteFunctionFragment(fragment: FunctionFragment): boolean {
