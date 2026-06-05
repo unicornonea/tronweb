@@ -9,7 +9,7 @@ import { createWalletClient } from '../../src/clients/createWalletClient.js';
 import { getContract } from '../../src/clients/getContract.js';
 import { Trx } from '../../src/lib/trx.js';
 import { HttpProvider } from '../../src/lib/providers/index.js';
-import { mainnet, nile, shasta } from '../../src/chains/index.js';
+import { mainnet, nile, shasta } from '../../src/clients/chains.js';
 import * as tbActions from '../../src/lib/actions/transactionBuilder.js';
 import * as trxActions from '../../src/lib/actions/trx.js';
 import tronWebBuilder from '../helpers/tronWebBuilder.js';

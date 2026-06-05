@@ -1,7 +1,7 @@
 import { HttpProvider } from '../lib/providers/index.js';
 import type { HeadersType } from '../types/Providers.js';
 import type { NodeProvider, TronWebOptions } from '../types/TronWeb.js';
-import type { Chain } from '../chains/index.js';
+import type { Chain } from './chains.js';
 import { http } from '../transports/http.js';
 import type { HttpTransport, Transport } from '../transports/types.js';
 

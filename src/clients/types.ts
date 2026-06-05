@@ -2,7 +2,7 @@ import type * as tbActions from '../lib/actions/transactionBuilder.js';
 import type { Account, BroadcastReturn, TransactionInfo } from '../types/Trx.js';
 import type { Block, GetTransactionResponse } from '../types/APIResponse.js';
 import type { Hex, SignTypedDataParameters, SignableMessage, WalletAccount } from '../accounts/types.js';
-import type { Chain } from '../chains/index.js';
+import type { Chain } from './chains.js';
 import type { Transport } from '../transports/index.js';
 import type { ContractAbiInterface, EventFragment, FunctionFragment, GetOutputsType, GetParamsType } from '../types/ABI.js';
 import type { EventResponse, GetEventResultOptions } from '../types/Event.js';

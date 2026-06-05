@@ -28,7 +28,7 @@ export { TronWeb };
 import { privateKeyToAccount } from './accounts/index.js';
 export { privateKeyToAccount };
 
-import { defineChain, mainnet, nile, shasta } from './chains/index.js';
+import { defineChain, mainnet, nile, shasta } from './clients/chains.js';
 export { defineChain, mainnet, nile, shasta };
 
 import { http } from './transports/index.js';
@@ -41,7 +41,7 @@ import * as Types from './types/index.js';
 export { Types };
 
 export type { Account } from './accounts/index.js';
-export type { Chain } from './chains/index.js';
+export type { Chain } from './clients/chains.js';
 export type {
     ContractFunctions,
     PublicClient,
