@@ -15,10 +15,6 @@
             "import": "./lib/esm/index.js",
             "require": "./lib/commonjs/index.js"
         },
-        "./chains": {
-            "import": "./lib/esm/chains/index.js",
-            "require": "./lib/commonjs/chains/index.js"
-        },
         "./utils": {
             "import": "./lib/esm/utils/index.js",
             "require": "./lib/commonjs/utils/index.js"
@@ -26,9 +22,6 @@
     },
     "typesVersions": {
         "*": {
-            "chains": [
-                "lib/esm/chains/index.d.ts"
-            ],
             "utils": [
                 "lib/esm/utils/index.d.ts"
             ]
