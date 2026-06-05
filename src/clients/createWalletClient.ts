@@ -18,7 +18,7 @@ import type { SignedTransaction, Transaction } from '../types/Transaction.js';
 import { toHex } from '../utils/address.js';
 import { createClientQueryActions } from './createClientQueryActions.js';
 import { createClientMetadata } from './createClientMetadata.js';
-import { resolveClientProviders } from './resolveClientConfig.js';
+import { resolveClientProviders, resolveCallValue } from './resolvers.js';
 import { buildFunctionSelector, resolveFunctionFragment } from '../utils/abi.js';
 import * as tbActions from '../lib/actions/transactionBuilder.js';
 import * as trxActions from '../lib/actions/trx.js';
@@ -140,18 +140,6 @@ function getWriteContractFragment<
     }
 
     return fragment;
-}
-
-function resolveCallValue(value: number | bigint | undefined): number | undefined {
-    if (value === undefined) return undefined;
-    if (typeof value === 'bigint') {
-        // Number(bigint) silently loses precision above 2^53; reject rather than truncate.
-        if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
-            throw new Error('call value exceeds safe integer range');
-        }
-        return Number(value);
-    }
-    return value;
 }
 
 function resolveSignerAddress(account: WalletAccount, accountOverride: string | undefined): string {
