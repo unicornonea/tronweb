@@ -15,10 +15,9 @@ import type {
 import type { WalletAccount } from '../accounts/types.js';
 import type { ContractAbiInterface, FunctionFragment } from '../types/ABI.js';
 import type { SignedTransaction, Transaction } from '../types/Transaction.js';
-import { toHex } from '../utils/address.js';
 import { createClientQueryActions } from './createClientQueryActions.js';
 import { createClientMetadata } from './createClientMetadata.js';
-import { resolveClientProviders, resolveCallValue } from './resolvers.js';
+import { resolveClientProviders, resolveCallValue, resolveSignerAddress } from './resolvers.js';
 import { buildFunctionSelector, resolveFunctionFragment } from '../utils/abi.js';
 import * as tbActions from '../lib/actions/transactionBuilder.js';
 import * as trxActions from '../lib/actions/trx.js';
@@ -140,14 +139,6 @@ function getWriteContractFragment<
     }
 
     return fragment;
-}
-
-function resolveSignerAddress(account: WalletAccount, accountOverride: string | undefined): string {
-    if (accountOverride === undefined) return account.address;
-    if (toHex(accountOverride).toLowerCase() !== toHex(account.address).toLowerCase()) {
-        throw new Error('Wallet client account override must match the configured account.');
-    }
-    return accountOverride;
 }
 
 function getBroadcastErrorMessage(broadcast: Record<string, unknown>): string {

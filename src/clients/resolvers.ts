@@ -6,6 +6,7 @@ import { http } from '../transports/http.js';
 import type { HttpTransport, Transport } from '../transports/types.js';
 import { ADDRESS_PREFIX } from '../utils/constants.js';
 import { hexToBytes } from '../utils/bytes.js';
+import { toHex } from '../utils/address.js';
 import type {
     GetBlockParameters,
     GetBlockTransactionCountParameters,
@@ -15,7 +16,7 @@ import type {
     VerifyMessageParameters,
     WaitForTransactionReceiptParameters,
 } from './types.js';
-import type { Hex, SignableMessage } from '../accounts/types.js';
+import type { Hex, SignableMessage, WalletAccount } from '../accounts/types.js';
 
 const DEFAULT_FEE_LIMIT = 150_000_000;
 const NULL_CALLER_ADDRESS = `${ADDRESS_PREFIX}${'0'.repeat(40)}`;
@@ -283,4 +284,12 @@ export function resolveTransactionHashInput(
     }
 
     return input.hash;
+}
+
+export function resolveSignerAddress(account: WalletAccount, accountOverride: string | undefined): string {
+    if (accountOverride === undefined) return account.address;
+    if (toHex(accountOverride).toLowerCase() !== toHex(account.address).toLowerCase()) {
+        throw new Error('Wallet client account override must match the configured account.');
+    }
+    return accountOverride;
 }
