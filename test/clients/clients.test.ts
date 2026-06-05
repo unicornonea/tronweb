@@ -1082,3 +1082,87 @@ describe('createWalletClient — writeContract argument defaulting', function ()
         assert.equal(omitted, empty);
     });
 });
+
+describe('getContract — event argument classification', function () {
+    // A stub client captures how getEvents splits its first object arg into args vs
+    // paging options — no node needed.
+    function makeContract(eventInputs: ReadonlyArray<{ indexed: boolean; name: string; type: string }>) {
+        const abi = [{ type: 'event', name: 'Ev', anonymous: false, inputs: eventInputs }];
+        let received: any;
+        const stubClient: any = {
+            getContractEvents: async (params: any) => {
+                received = params;
+                return { data: [], success: true };
+            },
+        };
+        const contract = getContract({
+            client: stubClient,
+            abi: abi as any,
+            address: fromHex('410000000000000000000000000000000000000001'),
+        }) as any;
+        return { contract, get: () => received };
+    }
+
+    it('reads an arg object as a filter when a key collides with an indexed input (audit #6)', async function () {
+        const { contract, get } = makeContract([
+            { indexed: true, name: 'limit', type: 'uint256' }, // collides with the `limit` option key
+            { indexed: false, name: 'value', type: 'uint256' },
+        ]);
+        await contract.getEvents.Ev({ limit: 5 });
+        // Collision with the indexed `limit` input → treated as an arg filter, not paging.
+        assert.deepEqual(get().args, { limit: 5 });
+        assert.notProperty(get(), 'limit');
+    });
+
+    it('still reads an option-only object as paging options when there is no collision', async function () {
+        const { contract, get } = makeContract([
+            { indexed: true, name: 'from', type: 'address' },
+            { indexed: false, name: 'value', type: 'uint256' },
+        ]);
+        await contract.getEvents.Ev({ limit: 5 });
+        // No `limit` input → a genuine paging option.
+        assert.equal(get().limit, 5);
+        assert.isUndefined(get().args);
+    });
+
+    it('maps a positional args array to the named ABI inputs', async function () {
+        const { contract, get } = makeContract([
+            { indexed: true, name: 'limit', type: 'uint256' },
+            { indexed: false, name: 'value', type: 'uint256' },
+        ]);
+        await contract.getEvents.Ev([5, 7]);
+        assert.deepEqual(get().args, { limit: 5, value: 7 });
+        assert.notProperty(get(), 'limit');
+    });
+
+    it('splits an explicit (args, options) pair', async function () {
+        const { contract, get } = makeContract([
+            { indexed: true, name: 'limit', type: 'uint256' },
+            { indexed: false, name: 'value', type: 'uint256' },
+        ]);
+        // First arg is the filter, second is paging options — even though `value`/`limit`
+        // are also names, the two-arg form is unambiguous.
+        await contract.getEvents.Ev({ value: 7 }, { limit: 3 });
+        assert.deepEqual(get().args, { value: 7 });
+        assert.equal(get().limit, 3);
+    });
+
+    it('reads an empty object as paging options (no args, no collision)', async function () {
+        const { contract, get } = makeContract([
+            { indexed: true, name: 'from', type: 'address' },
+            { indexed: false, name: 'value', type: 'uint256' },
+        ]);
+        await contract.getEvents.Ev({});
+        assert.isUndefined(get().args);
+    });
+
+    it('treats an object with a non-option key as args (existing filter behavior)', async function () {
+        const { contract, get } = makeContract([
+            { indexed: true, name: 'from', type: 'address' },
+            { indexed: false, name: 'value', type: 'uint256' },
+        ]);
+        await contract.getEvents.Ev({ from: 'T-some-address' });
+        assert.deepEqual(get().args, { from: 'T-some-address' });
+        assert.isUndefined(get().limit);
+    });
+});
