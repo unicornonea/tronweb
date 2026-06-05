@@ -102,10 +102,10 @@ function toHttpProvider(value: HttpProvider | string | undefined, fallback?: Nod
  */
 export function resolveClientProviders(config: ClientConfigWithTransport): ResolvedClientProviders {
     const { chain, transport, tronWebConfig } = resolveClientConfig(config);
-    const fullHost = tronWebConfig.fullHost;
-    const fullNode = toHttpProvider(tronWebConfig.fullNode, fullHost, tronWebConfig.headers);
-    const solidityNode = toHttpProvider(tronWebConfig.solidityNode, fullHost, tronWebConfig.headers);
-    const eventServer = toHttpProvider(tronWebConfig.eventServer, fullHost, tronWebConfig.eventHeaders);
+    const { eventHeaders, fullHost, headers } = tronWebConfig;
+    const fullNode = toHttpProvider(tronWebConfig.fullNode, fullHost, headers);
+    const solidityNode = toHttpProvider(tronWebConfig.solidityNode, fullHost, headers);
+    const eventServer = toHttpProvider(tronWebConfig.eventServer, fullHost, eventHeaders ?? headers);
 
     if (!fullNode) {
         throw new Error('Client requires fullNode (or fullHost) to be configured.');
