@@ -1,4 +1,3 @@
-import { AxiosRequestHeaders } from 'axios';
 import { BigNumber } from 'bignumber.js';
 import type { HeadersType } from './Providers.js';
 import HttpProvider from '../lib/providers/HttpProvider.js';
@@ -11,7 +10,7 @@ export interface TronWebOptions {
     fullHost?: NodeProvider;
     eventServer?: NodeProvider;
     headers?: HeadersType;
-    eventHeaders?: AxiosRequestHeaders;
+    eventHeaders?: HeadersType;
     privateKey?: string;
     disablePlugins?: boolean;
 }

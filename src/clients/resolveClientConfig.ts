@@ -1,6 +1,6 @@
 import { HttpProvider } from '../lib/providers/index.js';
 import type { HeadersType } from '../types/Providers.js';
-import type { TronWebOptions } from '../types/TronWeb.js';
+import type { NodeProvider, TronWebOptions } from '../types/TronWeb.js';
 import type { Chain } from '../chains/index.js';
 import { http } from '../transports/http.js';
 import type { HttpTransport, Transport } from '../transports/types.js';
@@ -32,20 +32,19 @@ export interface ResolvedClientProviders {
 }
 
 function hasExplicitNodeConfig(config: Omit<TronWebOptions, 'privateKey'>) {
-    return Boolean(config.fullHost || config.fullNode || config.solidityNode || config.eventServer);
+    return Boolean(config.fullHost || config.fullNode);
 }
 
-function resolveHttpTransport(chain?: Chain, transport?: Transport): ResolvedHttpTransport | undefined {
-    if (!transport) {
-        const url = chain?.rpcUrls.default.http[0];
-        return url ? (http(url) as ResolvedHttpTransport) : undefined;
-    }
-
-    const url = transport.url ?? chain?.rpcUrls.default.http[0];
+function resolveHttpTransport(chain?: Chain, transport?: Transport): ResolvedHttpTransport {
+    const url = transport?.url ?? chain?.rpcUrls.default.http[0];
     if (!url) {
         throw new Error(
             'Could not resolve an HTTP endpoint. Provide transport: http(url), or pass a chain with a default HTTP RPC URL.'
         );
+    }
+
+    if (!transport) {
+        return http(url) as ResolvedHttpTransport;
     }
 
     return {
@@ -70,31 +69,28 @@ export function resolveClientConfig(config: ClientConfigWithTransport): Resolved
     }
 
     const resolvedTransport = resolveHttpTransport(chain, transport);
-    if (!resolvedTransport) {
-        return { chain, transport, tronWebConfig };
-    }
-
     const { headers = {}, timeout = 30000, url } = resolvedTransport;
-    const eventHeaders = ((tronWebConfig.eventHeaders as HeadersType | undefined) ?? headers) as HeadersType;
-    const { headers: _headers, eventHeaders: _eventHeaders, ...rest } = tronWebConfig;
 
     return {
         chain,
         transport: resolvedTransport,
         tronWebConfig: {
-            ...rest,
             fullNode: new HttpProvider(url, timeout, '', '', headers),
             solidityNode: new HttpProvider(url, timeout, '', '', headers),
-            eventServer: new HttpProvider(url, timeout, '', '', eventHeaders),
+            eventServer: new HttpProvider(url, timeout, '', '', headers),
         },
     };
 }
 
-function toHttpProvider(value: HttpProvider | string | undefined, fallback?: string): HttpProvider | undefined {
+function toHttpProvider(value: HttpProvider | string | undefined, fallback?: NodeProvider, headers?: HeadersType): HttpProvider | undefined {
     if (value === undefined) {
-        return fallback ? new HttpProvider(fallback) : undefined;
+        return fallback
+            ? typeof fallback === 'string'
+                ? new HttpProvider(fallback, undefined, '', '', headers)
+                : fallback
+            : undefined;
     }
-    return typeof value === 'string' ? new HttpProvider(value) : value;
+    return typeof value === 'string' ? new HttpProvider(value, undefined, '', '', headers) : value;
 }
 
 /**
@@ -106,10 +102,10 @@ function toHttpProvider(value: HttpProvider | string | undefined, fallback?: str
  */
 export function resolveClientProviders(config: ClientConfigWithTransport): ResolvedClientProviders {
     const { chain, transport, tronWebConfig } = resolveClientConfig(config);
-    const fullHost = (tronWebConfig as { fullHost?: string }).fullHost;
-    const fullNode = toHttpProvider(tronWebConfig.fullNode, fullHost);
-    const solidityNode = toHttpProvider(tronWebConfig.solidityNode, fullHost);
-    const eventServer = toHttpProvider(tronWebConfig.eventServer, fullHost);
+    const fullHost = tronWebConfig.fullHost;
+    const fullNode = toHttpProvider(tronWebConfig.fullNode, fullHost, tronWebConfig.headers);
+    const solidityNode = toHttpProvider(tronWebConfig.solidityNode, fullHost, tronWebConfig.headers);
+    const eventServer = toHttpProvider(tronWebConfig.eventServer, fullHost, tronWebConfig.eventHeaders);
 
     if (!fullNode) {
         throw new Error('Client requires fullNode (or fullHost) to be configured.');
