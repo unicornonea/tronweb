@@ -144,6 +144,9 @@ export function resolveCallValue(value: number | bigint | undefined): number | u
         }
         return Number(value);
     }
+    if (typeof value !== 'number') {
+        throw new Error('call value must be a number or bigint');
+    }
     return value;
 }
 
