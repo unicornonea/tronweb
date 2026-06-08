@@ -1,7 +1,6 @@
 import type {
     Hex,
     PrivateKeyAccount,
-    SignableMessage,
     SignMessageParameters,
     SignTypedDataParameters,
 } from './types.js';
@@ -18,33 +17,13 @@ import { signMessage as cryptoSignMessage } from '../../utils/message.js';
 import { signTypedData as cryptoSignTypedData } from '../../utils/typedData.js';
 import { txCheck } from '../../utils/transaction.js';
 import { hexStr2byteArray, byteArray2hexStr } from '../../utils/code.js';
-import { hexToBytes } from '../../utils/bytes.js';
+import { resolveMessageInput } from '../resolvers.js';
 
 function normalizePrivateKey(privateKey: string): Hex {
     if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey)) {
         throw new Error('Invalid private key: must be a 0x-prefixed 32-byte hex string');
     }
     return privateKey as Hex;
-}
-
-function normalizeRawMessage(raw: Hex | Uint8Array): Uint8Array {
-    if (raw instanceof Uint8Array) return raw;
-
-    if (!/^0x[0-9a-fA-F]+$/.test(raw)) {
-        throw new Error('Invalid raw message: must be a 0x-prefixed hex string or Uint8Array');
-    }
-
-    // raw.length includes the even-length '0x' prefix, so its parity matches the hex digit count.
-    if (raw.length % 2 !== 0) {
-        throw new Error('Invalid raw message: hex string must have an even number of digits');
-    }
-
-    return hexToBytes(raw.slice(2));
-}
-
-function resolveMessageInput(message: SignableMessage): string | Uint8Array {
-    if (typeof message === 'string') return message;
-    return normalizeRawMessage(message.raw);
 }
 
 function isTransactionShapeValid(transaction: Transaction): boolean {
