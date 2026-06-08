@@ -20,6 +20,7 @@ import { hexStr2byteArray, byteArray2hexStr } from '../../utils/code.js';
 import { resolveMessageInput } from '../resolvers.js';
 
 function normalizePrivateKey(privateKey: string): Hex {
+    privateKey = `0x${privateKey.replace(/^0x/, '')}`;
     if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey)) {
         throw new Error('Invalid private key: must be a 0x-prefixed 32-byte hex string');
     }
@@ -65,7 +66,7 @@ function assertSignableTx(transaction: Transaction, addressHex: string): void {
  * console.log(account.publicKey); // 0x04...
  * ```
  */
-export function privateKeyToAccount(privateKey: Hex): PrivateKeyAccount {
+export function privateKeyToAccount(privateKey: string): PrivateKeyAccount {
     const normalizedPrivateKey = normalizePrivateKey(privateKey);
     const privateKeyBytes = hexStr2byteArray(normalizedPrivateKey.slice(2));
     const publicKey = `0x${byteArray2hexStr(getPubKeyFromPriKey(privateKeyBytes))}` as Hex;
