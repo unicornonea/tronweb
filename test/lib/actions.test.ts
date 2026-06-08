@@ -612,6 +612,25 @@ describe('action layer', function () {
             assert.equal(clientResult, legacyResult[0]);
         });
 
+        it('readContract decodes identically with unnamed only outputs compared to legacy tronWeb.contract().call()', async function () {
+            this.timeout(30000);
+            const unnamedAbi = JSON.parse(JSON.stringify(Contracts.testConstant.abi));
+            for (const entry of unnamedAbi) {
+                for (const output of entry.outputs ?? []) {
+                    delete output.name;
+                }
+            }
+            const legacy = await legacyTron.contract(unnamedAbi, constantAddress);
+            const legacyResult = await legacy.testPure(1, 2).call();
+            const clientResult = await publicClient.readContract({
+                address: constantAddress,
+                abi: unnamedAbi,
+                functionName: 'testPure',
+                args: [1, 2],
+            } as any);
+            assert.deepEqual(clientResult, legacyResult);
+        });
+
         it('writeContract calldata matches legacy tronWeb.contract().send()', async function () {
             this.timeout(60000);
             const legacy = await legacyTron.contract(Contracts.testSetVal.abi).at(setValAddress);
