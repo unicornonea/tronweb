@@ -598,7 +598,7 @@ describe('action layer', function () {
             setValAddress = await deploy(Contracts.testSetVal);
         });
 
-        it('readContract decodes identically to legacy tronWeb.contract().call()', async function () {
+        it('readContract decodes differently with named only outputs compared to legacy tronWeb.contract().call()', async function () {
             this.timeout(30000);
             const legacy = await legacyTron.contract(Contracts.testConstant.abi).at(constantAddress);
             const legacyResult = await legacy.testPure(1, 2).call();
@@ -608,7 +608,8 @@ describe('action layer', function () {
                 functionName: 'testPure',
                 args: [1, 2],
             } as any);
-            assert.deepEqual(clientResult, legacyResult);
+            assert.notDeepEqual(clientResult, legacyResult);
+            assert.equal(clientResult, legacyResult[0]);
         });
 
         it('writeContract calldata matches legacy tronWeb.contract().send()', async function () {

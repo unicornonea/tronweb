@@ -157,6 +157,8 @@ type IsNever<T> = [T] extends [never] ? true : false;
 
 type ChangeNeverToAnyArray<T> = IsNever<T> extends true ? any[] : T;
 
+type ChangeNeverToAny<T> = IsNever<T> extends true ? any : T;
+
 type ChangeNeverToString<T> = IsNever<T> extends true ? string : T;
 
 export type ReadContractParameters<
@@ -174,7 +176,7 @@ export type ReadContractParameters<
 export type ReadContractReturnType<
     Abi extends ContractAbiInterface = ContractAbiInterface,
     FunctionName extends ReadContractFunctionName<Abi> = ReadContractFunctionName<Abi>,
-> = CollapseSingleItemTuple<GetOutputsType<ReadContractOutputs<Abi, FunctionName>>>;
+> = ChangeNeverToAny<CollapseSingleItemTuple<GetOutputsType<ReadContractOutputs<Abi, FunctionName>>>>;
 
 export type EstimateContractGasParameters<
     Abi extends ContractAbiInterface = ContractAbiInterface,
