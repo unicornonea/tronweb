@@ -370,7 +370,6 @@ export class Interface {
             try {
                 frags.push(Fragment.from(a));
             } catch (error) {
-                console.log('EE', error);
             }
         }
 
@@ -389,7 +388,6 @@ export class Interface {
             switch (fragment.type) {
                 case 'constructor':
                     if (this.deploy) {
-                        console.log('duplicate definition - constructor');
                         return;
                     }
                     //checkNames(fragment, "input", fragment.inputs);
