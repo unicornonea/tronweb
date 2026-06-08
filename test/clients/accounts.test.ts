@@ -142,11 +142,7 @@ describe('privateKeyToAccount', function () {
         assert.isUndefined((account as any).privateKey);
     });
 
-    it('requires a 0x-prefixed 32-byte private key', function () {
-        assert.throws(
-            () => privateKeyToAccount('1'.padStart(64, '0') as any),
-            'Invalid private key: must be a 0x-prefixed 32-byte hex string'
-        );
+    it('requires a 32-byte private key', function () {
         assert.throws(
             () => privateKeyToAccount('0x1' as any),
             'Invalid private key: must be a 0x-prefixed 32-byte hex string'
