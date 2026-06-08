@@ -138,6 +138,9 @@ export function resolveClientProviders(config: ClientConfigWithTransport): Resol
 export function resolveCallValue(value: number | bigint | undefined): number | undefined {
     if (value === undefined) return undefined;
     if (typeof value === 'bigint') {
+        if (value < 0n) {
+            throw new Error('call value cannot be negative');
+        }
         // Number(bigint) silently loses precision above 2^53; reject rather than truncate.
         if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
             throw new Error('call value exceeds safe integer range');
@@ -146,6 +149,9 @@ export function resolveCallValue(value: number | bigint | undefined): number | u
     }
     if (typeof value !== 'number') {
         throw new Error('call value must be a number or bigint');
+    }
+    if (value < 0) {
+        throw new Error('call value cannot be negative');
     }
     return value;
 }

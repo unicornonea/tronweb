@@ -554,6 +554,37 @@ describe('client factories', function () {
         );
     });
 
+    it('rejects a negative call value', async function () {
+        // resolveCallValue throws before any node request, so a negative value is
+        // rejected regardless of the contract/method targeted (no deploy needed).
+        const walletClient = createWalletClient({ account, fullHost: FULL_NODE_API });
+        const publicClient = createPublicClient({ fullHost: FULL_NODE_API });
+
+        await assertRejectsWithMessage(
+            () =>
+                walletClient.writeContract({
+                    address: account.address,
+                    abi: revertFixture.abi as any,
+                    functionName: 'setOwner',
+                    args: [account.address],
+                    value: -1,
+                } as any),
+            'call value cannot be negative'
+        );
+        await assertRejectsWithMessage(
+            () =>
+                publicClient.readContract({
+                    address: account.address,
+                    abi: revertFixture.abi as any,
+                    functionName: 'getOwner',
+                    args: [1],
+                    value: -1n,
+                    account: account.address,
+                } as any),
+            'call value cannot be negative'
+        );
+    });
+
     it('throws when sendTransaction broadcast returns an error code', async function () {
         this.timeout(60000);
         const other = funded.b58.find((a) => a !== deployer.address)!;
