@@ -153,7 +153,10 @@ export function resolveCallValue(value: number | bigint | undefined): number | u
     if (value < 0) {
         throw new Error('call value cannot be negative');
     }
-    if (BigInt(value) > BigInt(Number.MAX_SAFE_INTEGER)) {
+    if (!Number.isInteger(value)) {
+        throw new Error('call value must be an integer');
+    }
+    if (value > Number.MAX_SAFE_INTEGER) {
         throw new Error('call value exceeds safe integer range');
     }
     return value;
