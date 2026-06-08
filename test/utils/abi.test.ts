@@ -3,7 +3,7 @@ import config from '../helpers/config.js';
 import tronWebBuilder from '../helpers/tronWebBuilder.js';
 import testUtils from '../helpers/testUtils.js';
 import diskUtils from '../testcases/src/disk-utils.js';
-import { buildFullTypeDefinition, buildFunctionSelector } from '../../src/utils/abi.js';
+import { buildFullTypeDefinition, buildFunctionSelector, resolveFunctionFragment } from '../../src/utils/abi.js';
 
 const { ADDRESS_HEX, ADDRESS_BASE58 } = config;
 const { loadTests } = diskUtils;
@@ -301,6 +301,165 @@ describe('TronWeb.utils.abi', function () {
                 }),
                 'inspect((address,trcToken,(address,bool)),(address,uint256)[])'
             );
+        });
+    });
+
+    describe('#resolveFunctionFragment()', function () {
+        it('disambiguates equal-arity struct overloads by component types', function () {
+            const abi: any = [
+                {
+                    type: 'function',
+                    name: 'submit',
+                    inputs: [{ name: 'p', type: 'tuple', components: [{ name: 'flag', type: 'bool' }] }],
+                },
+                {
+                    type: 'function',
+                    name: 'submit',
+                    inputs: [{ name: 'p', type: 'tuple', components: [{ name: 'amount', type: 'uint256' }] }],
+                },
+            ];
+
+            assert.equal(buildFunctionSelector(resolveFunctionFragment(abi, 'submit', [{ flag: true }])), 'submit((bool))');
+            assert.equal(
+                buildFunctionSelector(resolveFunctionFragment(abi, 'submit', [{ amount: 100 }])),
+                'submit((uint256))'
+            );
+        });
+
+        it('disambiguates equal-arity struct overloads passed in positional array form', function () {
+            const abi: any = [
+                {
+                    type: 'function',
+                    name: 'submit',
+                    inputs: [{ name: 'p', type: 'tuple', components: [{ name: 'flag', type: 'bool' }] }],
+                },
+                {
+                    type: 'function',
+                    name: 'submit',
+                    inputs: [{ name: 'p', type: 'tuple', components: [{ name: 'amount', type: 'uint256' }] }],
+                },
+            ];
+
+            assert.equal(buildFunctionSelector(resolveFunctionFragment(abi, 'submit', [[true]])), 'submit((bool))');
+            assert.equal(buildFunctionSelector(resolveFunctionFragment(abi, 'submit', [[100]])), 'submit((uint256))');
+        });
+
+        it('disambiguates struct overloads that differ only in field count', function () {
+            const abi: any = [
+                {
+                    type: 'function',
+                    name: 'submit',
+                    inputs: [{ name: 'p', type: 'tuple', components: [{ name: 'a', type: 'uint256' }] }],
+                },
+                {
+                    type: 'function',
+                    name: 'submit',
+                    inputs: [
+                        {
+                            name: 'p',
+                            type: 'tuple',
+                            components: [
+                                { name: 'a', type: 'uint256' },
+                                { name: 'b', type: 'uint256' },
+                            ],
+                        },
+                    ],
+                },
+            ];
+
+            assert.equal(buildFunctionSelector(resolveFunctionFragment(abi, 'submit', [[1]])), 'submit((uint256))');
+            assert.equal(
+                buildFunctionSelector(resolveFunctionFragment(abi, 'submit', [[1, 2]])),
+                'submit((uint256,uint256))'
+            );
+        });
+
+        it('disambiguates fixed-length array overloads by length', function () {
+            const abi: any = [
+                { type: 'function', name: 'foo', inputs: [{ name: 'a', type: 'uint256[2]' }] },
+                { type: 'function', name: 'foo', inputs: [{ name: 'a', type: 'uint256[3]' }] },
+            ];
+
+            assert.equal(buildFunctionSelector(resolveFunctionFragment(abi, 'foo', [[1, 2]])), 'foo(uint256[2])');
+            assert.equal(buildFunctionSelector(resolveFunctionFragment(abi, 'foo', [[1, 2, 3]])), 'foo(uint256[3])');
+        });
+
+        it('distinguishes a dynamic array from a fixed-length array by length', function () {
+            const abi: any = [
+                { type: 'function', name: 'foo', inputs: [{ name: 'a', type: 'uint256[]' }] },
+                { type: 'function', name: 'foo', inputs: [{ name: 'a', type: 'uint256[3]' }] },
+            ];
+
+            // A length that the fixed array cannot hold only fits the dynamic one.
+            assert.equal(buildFunctionSelector(resolveFunctionFragment(abi, 'foo', [[1, 2]])), 'foo(uint256[])');
+            // A length-3 array satisfies both, so it is genuinely ambiguous.
+            assert.throws(() => resolveFunctionFragment(abi, 'foo', [[1, 2, 3]]), /Ambiguous overloaded function/);
+        });
+
+        it('disambiguates array overloads by element type', function () {
+            const abi: any = [
+                { type: 'function', name: 'foo', inputs: [{ name: 'a', type: 'address[]' }] },
+                { type: 'function', name: 'foo', inputs: [{ name: 'a', type: 'uint256[]' }] },
+            ];
+
+            assert.equal(
+                buildFunctionSelector(resolveFunctionFragment(abi, 'foo', [['TXXXYYYZZZ']])),
+                'foo(address[])'
+            );
+            assert.equal(buildFunctionSelector(resolveFunctionFragment(abi, 'foo', [[1, 2]])), 'foo(uint256[])');
+        });
+
+        it('disambiguates fixed-length tuple-array overloads by length', function () {
+            const components = [{ name: 'x', type: 'uint256' }];
+            const abi: any = [
+                { type: 'function', name: 'foo', inputs: [{ name: 'a', type: 'tuple[2]', components }] },
+                { type: 'function', name: 'foo', inputs: [{ name: 'a', type: 'tuple[3]', components }] },
+            ];
+
+            assert.equal(
+                buildFunctionSelector(resolveFunctionFragment(abi, 'foo', [[[1], [2]]])),
+                'foo((uint256)[2])'
+            );
+            assert.equal(
+                buildFunctionSelector(resolveFunctionFragment(abi, 'foo', [[[1], [2], [3]]])),
+                'foo((uint256)[3])'
+            );
+        });
+
+        it('disambiguates multi-dimensional array overloads by the outer dimension', function () {
+            const abi: any = [
+                { type: 'function', name: 'foo', inputs: [{ name: 'a', type: 'uint256[][2]' }] },
+                { type: 'function', name: 'foo', inputs: [{ name: 'a', type: 'uint256[][3]' }] },
+            ];
+
+            assert.equal(
+                buildFunctionSelector(resolveFunctionFragment(abi, 'foo', [[[1], [2]]])),
+                'foo(uint256[][2])'
+            );
+            assert.equal(
+                buildFunctionSelector(resolveFunctionFragment(abi, 'foo', [[[1], [2], [3]]])),
+                'foo(uint256[][3])'
+            );
+        });
+
+        it('still throws when struct overloads remain ambiguous, suggesting the canonical signature', function () {
+            const abi: any = [
+                {
+                    type: 'function',
+                    name: 'submit',
+                    inputs: [{ name: 'p', type: 'tuple', components: [{ name: 'value', type: 'uint256' }] }],
+                },
+                {
+                    type: 'function',
+                    name: 'submit',
+                    inputs: [{ name: 'p', type: 'tuple', components: [{ name: 'value', type: 'int256' }] }],
+                },
+            ];
+
+            // A bare number matches both uint256 and int256 leniently, so it stays ambiguous.
+            assert.throws(() => resolveFunctionFragment(abi, 'submit', [{ value: 5 }]), /Ambiguous overloaded function/);
+            // The hint must be a usable full signature, not "submit(tuple)".
+            assert.throws(() => resolveFunctionFragment(abi, 'submit', [{ value: 5 }]), /submit\(\(uint256\)\)/);
         });
     });
 

@@ -100,9 +100,43 @@ function isArgOfType(arg: unknown, input: AbiParamsCommon): boolean {
         return typeof arg === 'number' || typeof arg === 'bigint' || (typeof arg === 'string' && /^\d+$/.test(arg));
     }
     if (/^bytes\d*$/.test(type)) return typeof arg === 'string' || arg instanceof Uint8Array;
-    if (type.endsWith(']')) return Array.isArray(arg);
-    if (type.indexOf('tuple') === 0) return (typeof arg === 'object' && arg !== null) || Array.isArray(arg);
+
+    // Arrays (value or tuple, possibly multi-dimensional): the outermost
+    // (rightmost) dimension fixes the length for `T[N]` while `T[]` accepts any
+    // length; every element is matched recursively against the element type.
+    // This lets equal-arity array overloads be told apart by length, by the
+    // dynamic/fixed distinction, and by element type.
+    if (type.endsWith(']')) {
+        if (!Array.isArray(arg)) return false;
+        const match = type.match(/^(.*)\[(\d*)\]$/);
+        if (!match) return true; // malformed suffix → stay lenient
+        const [, elementType, fixedLength] = match;
+        if (fixedLength !== '' && arg.length !== Number(fixedLength)) return false;
+        const element: AbiParamsCommon = { ...input, type: elementType };
+        return arg.every((item) => isArgOfType(item, element));
+    }
+
+    // Tuples (structs): match the component shape so that struct overloads of
+    // equal arity can be told apart (different field count, or fields of
+    // distinguishable types).
+    if (type.indexOf('tuple') === 0) return isTupleArgOfShape(arg, input.components);
+
     return true; // unknown type → accept
+}
+
+/** Whether `arg` (object or positional array) matches a tuple's component shape. */
+function isTupleArgOfShape(arg: unknown, components: ReadonlyArray<AbiParamsCommon> | undefined): boolean {
+    if (typeof arg !== 'object' || arg === null) return false;
+    // No component metadata → keep the lenient default (accept any object).
+    if (!components || components.length === 0) return true;
+
+    if (Array.isArray(arg)) {
+        return arg.length === components.length && components.every((component, i) => isArgOfType(arg[i], component));
+    }
+
+    // Object form: every named component must be present and match.
+    const record = arg as Record<string, unknown>;
+    return components.every((component) => component.name in record && isArgOfType(record[component.name], component));
 }
 
 /** Distinct input-arities of the named overloads, ascending — for arg-count errors. */
@@ -157,7 +191,7 @@ export function resolveFunctionFragment(
     );
     if (byType.length === 1) return byType[0];
 
-    const signature = `${functionName}(${(byArity[0].inputs ?? []).map((input) => input.type).join(',')})`;
+    const signature = buildFunctionSelector(byArity[0]);
     throw new Error(
         `Ambiguous overloaded function "${functionName}" for the given arguments; ` +
             `pass the full signature (e.g. "${signature}") as functionName to disambiguate.`
