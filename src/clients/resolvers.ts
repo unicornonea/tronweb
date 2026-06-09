@@ -173,11 +173,7 @@ function normalizeRawMessage(raw: Hex | Uint8Array): Uint8Array {
     if (!/^0x[0-9a-fA-F]+$/.test(raw)) {
         throw new Error('Invalid raw message: must be a 0x-prefixed hex string or Uint8Array');
     }
-    // raw.length includes the even-length '0x' prefix, so its parity matches the hex digit count.
-    if (raw.length % 2 !== 0) {
-        throw new Error('Invalid raw message: hex string must have an even number of digits');
-    }
-    return hexToBytes(raw.slice(2));
+    return hexToBytes(raw);
 }
 
 function isRawMessageInput(

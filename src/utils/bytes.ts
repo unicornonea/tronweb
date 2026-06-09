@@ -73,6 +73,9 @@ export function hexToBytes(hex: string) {
         throw new Error('Invalid hex string')
     }
     hex = hex.replace(/^0x/, '');
+    if (hex.length % 2 !== 0) {
+        throw new Error('The passed value is not an even length hex string');
+    }
     return Uint8Array.from(hex.match(/../g) ?? [], b => parseInt(b, 16));
 }
 
