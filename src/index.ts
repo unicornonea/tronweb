@@ -47,7 +47,7 @@ export type {
     PublicClient,
     PublicClientConfig,
     SendTransactionConstantType,
-    SendTransactionParams,
+    CreateTransactionParams,
     SendTransactionReturn,
     WalletClient,
     WalletClientConfig,

@@ -316,6 +316,15 @@ export interface PublicClientActions {
     ) => Promise<ReadContractReturnType<Abi, FunctionName>>;
     readonly verifyMessage: (input: VerifyMessageParameters) => Promise<boolean>;
     readonly verifyTypedData: (input: VerifyTypedDataParameters) => Promise<boolean>;
+    /**
+     * Build a transaction-builder action's transaction (without signing or
+     * broadcasting). `type` selects an action; `parameters` are its positional
+     * args after the implicit provider prefix the client injects automatically.
+     * Resolves to the selected action's own return type.
+     */
+    readonly createTransaction: <K extends CreateTransactionType>(
+        params: CreateTransactionParams<K>
+    ) => CreateTransactionReturn<K>;
 }
 
 /** Configuration for createPublicClient (same shape as TronWebOptions, but no privateKey) */
@@ -345,7 +354,7 @@ export interface PublicClient extends ClientMetadata, PublicClientActions {
  * Each entry corresponds to an exported function in `lib/actions/transactionBuilder`
  * that produces a signable transaction.
  */
-export type SendTransactionType =
+export type CreateTransactionType =
     | 'sendTrx'
     | 'sendToken'
     | 'purchaseToken'
@@ -395,7 +404,7 @@ export type SendTransactionType =
  * AFTER the implicit provider prefix (fullNode, and where applicable solidityNode / cache)
  * that the wallet client injects automatically.
  */
-export type SendTransactionParams<K extends SendTransactionType = SendTransactionType> = {
+export type CreateTransactionParams<K extends CreateTransactionType = CreateTransactionType> = {
     type: K;
     parameters: (typeof tbActions)[K] extends (first: any, ...rest: infer R) => Promise<any>
         ? K extends 'triggerSmartContract' | 'triggerConstantContract' | 'triggerConfirmedConstantContract' | 'estimateEnergy' | 'deployConstantContract'
@@ -423,9 +432,16 @@ export type SendTransactionConstantType =
  * Constant/read-only actions resolve to the action's own result; every other action
  * is signed and broadcast, resolving to the broadcast result.
  */
-export type SendTransactionReturn<K extends SendTransactionType = SendTransactionType> = K extends SendTransactionConstantType
+export type SendTransactionReturn<K extends CreateTransactionType = CreateTransactionType> = K extends SendTransactionConstantType
     ? Awaited<ReturnType<(typeof tbActions)[K]>>
     : BroadcastReturn<SignedTransaction>;
+
+/**
+ * Resolved return type of PublicClientActions.createTransaction for a given
+ * action `type` — the transaction-builder action's own return type (a Promise),
+ * before any signing or broadcasting.
+ */
+export type CreateTransactionReturn<K extends CreateTransactionType = CreateTransactionType> = ReturnType<(typeof tbActions)[K]>;
 
 /** A write-capable client. */
 export interface WalletClient<TAccount extends WalletAccount = WalletAccount> extends PublicClient {
@@ -464,7 +480,7 @@ export interface WalletClient<TAccount extends WalletAccount = WalletAccount> ex
      * });
      * ```
      */
-    sendTransaction<K extends SendTransactionType>(
-        params: SendTransactionParams<K>
+    sendTransaction<K extends CreateTransactionType>(
+        params: CreateTransactionParams<K>
     ): Promise<SendTransactionReturn<K>>;
 }

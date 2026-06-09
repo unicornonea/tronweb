@@ -14,6 +14,9 @@ import type {
     VerifyTypedDataParameters,
     EstimateContractGasFunctionName,
     ReadContractFunctionName,
+    CreateTransactionType,
+    CreateTransactionParams,
+    CreateTransactionReturn,
 } from './types.js';
 import type { ContractAbiInterface, EventFragment, FunctionFragment } from '../types/ABI.js';
 import type { Chain } from './chains.js';
@@ -51,6 +54,97 @@ export interface CreateClientQueryActionsOptions {
     readonly eventServer?: HttpProvider;
     readonly feeLimit: number;
     readonly defaultAddress?: string;
+}
+
+const TRANSACTION_NEEDS_SOLIDITY: ReadonlySet<CreateTransactionType> = new Set([
+    'triggerSmartContract',
+    'triggerConstantContract',
+    'triggerConfirmedConstantContract',
+    'estimateEnergy',
+    'deployConstantContract',
+]);
+
+const TRANSACTION_NEEDS_CACHE: ReadonlySet<CreateTransactionType> = new Set(['clearABI']);
+
+const TRANSACTION_ALLOWED: ReadonlySet<CreateTransactionType> = new Set([
+    'sendTrx',
+    'sendToken',
+    'purchaseToken',
+    'freezeBalance',
+    'unfreezeBalance',
+    'freezeBalanceV2',
+    'unfreezeBalanceV2',
+    'cancelUnfreezeBalanceV2',
+    'delegateResource',
+    'undelegateResource',
+    'withdrawExpireUnfreeze',
+    'withdrawBlockRewards',
+    'applyForSR',
+    'vote',
+    'updateBrokerage',
+    'createSmartContract',
+    'triggerSmartContract',
+    'triggerConstantContract',
+    'triggerConfirmedConstantContract',
+    'estimateEnergy',
+    'deployConstantContract',
+    'clearABI',
+    'createToken',
+    'updateToken',
+    'createAccount',
+    'updateAccount',
+    'setAccountId',
+    'createProposal',
+    'deleteProposal',
+    'voteProposal',
+    'createTRXExchange',
+    'createTokenExchange',
+    'injectExchangeTokens',
+    'withdrawExchangeTokens',
+    'tradeExchangeTokens',
+    'updateSetting',
+    'updateEnergyLimit',
+    'updateAccountPermissions',
+    'newTxID',
+    'alterTransaction',
+    'extendExpiration',
+    'addUpdateData',
+]);
+
+// Index of the options object (which carries `feeLimit`) within the positional
+// `parameters` array passed to createTransaction, for the contract-building actions
+// whose validator requires `feeLimit > 0`. The typed writeContract/deployContract
+// helpers inject the client feeLimit themselves; the generic dispatcher must do the
+// same, otherwise a bare createTransaction('createSmartContract', [...]) with no
+// feeLimit throws "Invalid feeLimit provided".
+const FEE_LIMIT_OPTIONS_INDEX: Partial<Record<CreateTransactionType, number>> = {
+    createSmartContract: 0,
+    triggerSmartContract: 2,
+    triggerConstantContract: 2,
+    triggerConfirmedConstantContract: 2,
+    estimateEnergy: 2,
+};
+
+// Merge the client's default feeLimit into the options arg when the caller omitted it
+// (or passed a falsy 0). Mirrors the legacy `options.feeLimit || tronWeb.feeLimit` fallback.
+function applyDefaultFeeLimit(
+    type: CreateTransactionType,
+    parameters: readonly unknown[],
+    feeLimit: number
+): readonly unknown[] {
+    const optionsIndex = FEE_LIMIT_OPTIONS_INDEX[type];
+    if (optionsIndex === undefined) return parameters;
+
+    const options = parameters[optionsIndex];
+    // Only inject into a plain options object; leave unexpected shapes for the action to validate.
+    if (options !== undefined && (typeof options !== 'object' || options === null || Array.isArray(options))) {
+        return parameters;
+    }
+
+    const current = options as { feeLimit?: number } | undefined;
+    const next = parameters.slice();
+    next[optionsIndex] = { ...current, feeLimit: current?.feeLimit || feeLimit };
+    return next;
 }
 
 function isTransactionInfoPopulated(value: unknown): boolean {
@@ -219,7 +313,26 @@ export function createClientQueryActions({
         return eventServer;
     };
 
+    // Per-client ABI cache (replaces the old `tronWeb.trx.cache`). Reset on each
+    // client construction so cached contracts never bleed across instances.
+    const contractCache = { contracts: {} as Record<string, unknown> };
+
+    const createTransaction = <K extends CreateTransactionType>({
+        type,
+        parameters,
+    }: CreateTransactionParams<K>): CreateTransactionReturn<K> => {
+        if (!TRANSACTION_ALLOWED.has(type)) {
+            throw new Error(`Unknown transaction type: "${String(type)}"`);
+        }
+        const fn = (tbActions as Record<string, unknown>)[type] as (...args: unknown[]) => CreateTransactionReturn<K>;
+        const prefix: unknown[] = [fullNode];
+        if (TRANSACTION_NEEDS_SOLIDITY.has(type)) prefix.push(solidityNode);
+        if (TRANSACTION_NEEDS_CACHE.has(type)) prefix.push(contractCache);
+        return fn(...prefix, ...applyDefaultFeeLimit(type, parameters as readonly unknown[], feeLimit));
+    };
+
     return {
+        createTransaction,
         call: async ({ account, data, to, value }: CallParameters): Promise<CallReturnType> => {
             const transaction = await tbActions.triggerConstantContract(
                 fullNode,

@@ -3,7 +3,7 @@ export type {
     WalletClientConfig,
     PublicClient,
     WalletClient,
-    SendTransactionParams,
+    CreateTransactionParams,
     SendTransactionReturn,
     SendTransactionConstantType,
 } from './types.js';

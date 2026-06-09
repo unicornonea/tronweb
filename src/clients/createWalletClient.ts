@@ -3,9 +3,9 @@ import type { HttpProvider } from '../lib/providers/index.js';
 import type {
     DeployContractParameters,
     SendRawTransactionParameters,
-    SendTransactionParams,
+    CreateTransactionParams,
     SendTransactionReturn,
-    SendTransactionType,
+    CreateTransactionType,
     SignTransactionParameters,
     WalletClient,
     WalletClientConfig,
@@ -22,106 +22,15 @@ import { buildFunctionSelector, isReadOnlyFunctionFragment, resolveFunctionFragm
 import * as tbActions from '../lib/actions/transactionBuilder.js';
 import * as trxActions from '../lib/actions/trx.js';
 
-const SEND_TRANSACTION_NEEDS_SOLIDITY: ReadonlySet<SendTransactionType> = new Set([
-    'triggerSmartContract',
-    'triggerConstantContract',
-    'triggerConfirmedConstantContract',
-    'estimateEnergy',
-    'deployConstantContract',
-]);
-
-const SEND_TRANSACTION_NEEDS_CACHE: ReadonlySet<SendTransactionType> = new Set(['clearABI']);
-
 // Constant/read-only actions: they query the node and return a result instead of a
 // broadcastable transaction, so sendTransaction returns that result directly without
 // signing or broadcasting.
-const SEND_TRANSACTION_CONSTANT: ReadonlySet<SendTransactionType> = new Set([
+const SEND_TRANSACTION_CONSTANT: ReadonlySet<CreateTransactionType> = new Set([
     'triggerConstantContract',
     'triggerConfirmedConstantContract',
     'estimateEnergy',
     'deployConstantContract',
 ]);
-
-const SEND_TRANSACTION_ALLOWED: ReadonlySet<SendTransactionType> = new Set([
-    'sendTrx',
-    'sendToken',
-    'purchaseToken',
-    'freezeBalance',
-    'unfreezeBalance',
-    'freezeBalanceV2',
-    'unfreezeBalanceV2',
-    'cancelUnfreezeBalanceV2',
-    'delegateResource',
-    'undelegateResource',
-    'withdrawExpireUnfreeze',
-    'withdrawBlockRewards',
-    'applyForSR',
-    'vote',
-    'updateBrokerage',
-    'createSmartContract',
-    'triggerSmartContract',
-    'triggerConstantContract',
-    'triggerConfirmedConstantContract',
-    'estimateEnergy',
-    'deployConstantContract',
-    'clearABI',
-    'createToken',
-    'updateToken',
-    'createAccount',
-    'updateAccount',
-    'setAccountId',
-    'createProposal',
-    'deleteProposal',
-    'voteProposal',
-    'createTRXExchange',
-    'createTokenExchange',
-    'injectExchangeTokens',
-    'withdrawExchangeTokens',
-    'tradeExchangeTokens',
-    'updateSetting',
-    'updateEnergyLimit',
-    'updateAccountPermissions',
-    'newTxID',
-    'alterTransaction',
-    'extendExpiration',
-    'addUpdateData',
-]);
-
-// Index of the options object (which carries `feeLimit`) within the positional
-// `parameters` array passed to sendTransaction, for the contract-building actions
-// whose validator requires `feeLimit > 0`. The typed writeContract/deployContract
-// helpers inject the client feeLimit themselves; the generic dispatcher must do the
-// same, otherwise a bare sendTransaction({ type: 'createSmartContract', parameters:
-// [...] }) with no feeLimit throws "Invalid feeLimit provided".
-const FEE_LIMIT_OPTIONS_INDEX: Partial<Record<SendTransactionType, number>> = {
-    createSmartContract: 0,
-    triggerSmartContract: 2,
-    triggerConstantContract: 2,
-    triggerConfirmedConstantContract: 2,
-    estimateEnergy: 2,
-};
-
-// Merge the client's default feeLimit into the options arg when the caller omitted it
-// (or passed a falsy 0). Mirrors the legacy `options.feeLimit || tronWeb.feeLimit` fallback.
-function applyDefaultFeeLimit(
-    type: SendTransactionType,
-    parameters: readonly unknown[],
-    feeLimit: number
-): readonly unknown[] {
-    const optionsIndex = FEE_LIMIT_OPTIONS_INDEX[type];
-    if (optionsIndex === undefined) return parameters;
-
-    const options = parameters[optionsIndex];
-    // Only inject into a plain options object; leave unexpected shapes for the action to validate.
-    if (options !== undefined && (typeof options !== 'object' || options === null || Array.isArray(options))) {
-        return parameters;
-    }
-
-    const current = options as { feeLimit?: number } | undefined;
-    const next = parameters.slice();
-    next[optionsIndex] = { ...current, feeLimit: current?.feeLimit || feeLimit };
-    return next;
-}
 
 function getWriteContractFragment<
     Abi extends ContractAbiInterface,
@@ -185,26 +94,11 @@ export function createWalletClient<TAccount extends WalletAccount>(config: Walle
     const { account, key, name, ...clientConfig } = config;
     const { chain, transport, fullNode, solidityNode, eventServer, feeLimit } = resolveClientProviders(clientConfig);
 
-    // Per-client ABI cache (replaces the old `tronWeb.trx.cache`). Reset on each
-    // client construction so cached contracts never bleed across instances.
-    const contractCache = { contracts: {} as Record<string, unknown> };
-
-    const dispatchSendTransaction = (type: SendTransactionType, parameters: readonly unknown[]) => {
-        if (!SEND_TRANSACTION_ALLOWED.has(type)) {
-            throw new Error(`Unknown sendTransaction type: "${String(type)}"`);
-        }
-        const fn = (tbActions as Record<string, unknown>)[type] as (...args: unknown[]) => Promise<unknown>;
-        const prefix: unknown[] = [fullNode];
-        if (SEND_TRANSACTION_NEEDS_SOLIDITY.has(type)) prefix.push(solidityNode);
-        if (SEND_TRANSACTION_NEEDS_CACHE.has(type)) prefix.push(contractCache);
-        return fn(...prefix, ...applyDefaultFeeLimit(type, parameters, feeLimit));
-    };
-
-    const sendTransaction = async <K extends SendTransactionType>(
-        params: SendTransactionParams<K>
+    const sendTransaction = async <K extends CreateTransactionType>(
+        params: CreateTransactionParams<K>
     ): Promise<SendTransactionReturn<K>> => {
-        const { type, parameters } = params;
-        const result = (await dispatchSendTransaction(type, parameters as readonly unknown[])) as any;
+        const { type } = params;
+        const result = (await queryActions.createTransaction(params)) as any;
 
         // Constant/read-only actions don't yield a broadcastable transaction — return
         // the node's query result as-is, skipping signing and broadcasting.
