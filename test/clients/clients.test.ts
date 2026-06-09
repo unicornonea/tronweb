@@ -1197,3 +1197,132 @@ describe('getContract — event argument classification', function () {
         assert.isUndefined(get().limit);
     });
 });
+
+// createTransaction builds — but does not sign or broadcast — a transaction-builder
+// action's transaction. These cover a few of the most common TRON constructions
+// against the live node, mirroring test/lib/transactionBuilder.test.ts assertions on
+// the resulting raw_data contract shape.
+describe('createTransaction — common TRON transaction builders', function () {
+    this.timeout(120000);
+
+    // hex/base58-agnostic address body (drops the 0x / 41 prefix) for robust comparison.
+    const addrBody = (a: string) =>
+        (/^(0x)?(41)?[0-9a-f]{40}$/i.test(a) ? a : toHex(a)).toLowerCase().replace(/^0x/, '').replace(/^41/, '');
+    const paramOf = (tx: any) => tx.raw_data.contract[0].parameter;
+
+    const revertFixture = Contracts.testRevert;
+    const setOwnerFragment = revertFixture.abi.find((f: any) => f.name === 'setOwner');
+
+    let publicClient: ReturnType<typeof createPublicClient>;
+    let deployer: ReturnType<typeof privateKeyToAccount>;
+    let owner: string;
+    let recipient: string;
+    let revertAddress: string;
+
+    async function waitForReceipt(txId: string): Promise<any> {
+        for (let i = 0; i < 20; i++) {
+            const info: any = await publicClient.getTransactionInfo({ txId }).catch(() => ({}));
+            if (info && Object.keys(info).length) return info;
+            await wait(3);
+        }
+        throw new Error(`transaction not confirmed on chain: ${txId}`);
+    }
+
+    before(async function () {
+        this.timeout(180000);
+        const accounts = await tronWebBuilder.getTestAccounts(-1);
+        const idx = accounts.pks.findIndex((p) => /^(0x)?[0-9a-fA-F]{64}$/.test(p));
+        const pk = accounts.pks[idx].replace(/^0x/, '');
+        const ownerHex = accounts.hex[idx];
+        deployer = privateKeyToAccount(`0x${pk}` as `0x${string}`);
+        owner = deployer.address;
+        recipient = accounts.b58.find((a) => a !== owner)!;
+        publicClient = createPublicClient({ fullHost: FULL_NODE_API });
+
+        // Deploy TestRevert once so the triggerSmartContract build below targets a real
+        // contract (setOwner(address) is one of its writable methods).
+        const fullNode = new HttpProvider(FULL_NODE_API);
+        const deployTx = await tbActions.createSmartContract(
+            fullNode,
+            { abi: revertFixture.abi, bytecode: revertFixture.bytecode, feeLimit: 1_000_000_000 },
+            ownerHex
+        );
+        await trxActions.sendRawTransaction(fullNode, await deployer.signTransaction(deployTx));
+        await waitForReceipt(deployTx.txID);
+        revertAddress = deployTx.contract_address;
+    });
+
+    // sendTrx → TransferContract: a plain TRX transfer, the most common TRON transaction.
+    it('builds a TRX transfer (sendTrx) without signing or broadcasting it', async function () {
+        const tx: any = await publicClient.createTransaction({
+            type: 'sendTrx',
+            parameters: [recipient, 10, owner],
+        });
+
+        const parameter = paramOf(tx);
+        assert.equal(tx.txID.length, 64);
+        assert.equal(parameter.type_url, 'type.googleapis.com/protocol.TransferContract');
+        assert.equal(parameter.value.amount, 10);
+        assert.equal(addrBody(parameter.value.owner_address), addrBody(owner));
+        assert.equal(addrBody(parameter.value.to_address), addrBody(recipient));
+        // createTransaction only builds — the transaction must not be signed yet.
+        assert.isUndefined(tx.signature);
+    });
+
+    // freezeBalanceV2 → FreezeBalanceV2Contract: Stake 2.0, used to obtain resources.
+    it('builds a freezeBalanceV2 (stake 2.0) transaction', async function () {
+        const tx: any = await publicClient.createTransaction({
+            type: 'freezeBalanceV2',
+            parameters: [500e6, 'BANDWIDTH', owner],
+        });
+
+        const parameter = paramOf(tx);
+        assert.equal(parameter.type_url, 'type.googleapis.com/protocol.FreezeBalanceV2Contract');
+        assert.equal(parameter.value.frozen_balance, 500e6);
+        assert.equal(addrBody(parameter.value.owner_address), addrBody(owner));
+    });
+
+    // createSmartContract → CreateSmartContract: a contract deployment. Omitting feeLimit
+    // proves createTransaction injects the client default (150 TRX) before building.
+    it('builds a createSmartContract deploy and applies the client default feeLimit', async function () {
+        const fixture = Contracts.testRevert;
+        const tx: any = await publicClient.createTransaction({
+            type: 'createSmartContract',
+            parameters: [{ abi: fixture.abi, bytecode: fixture.bytecode } as any, owner],
+        });
+
+        const parameter = paramOf(tx);
+        assert.equal(parameter.type_url, 'type.googleapis.com/protocol.CreateSmartContract');
+        assert.equal(tx.raw_data.fee_limit, 150_000_000);
+        assert.isString(tx.contract_address);
+        assert.isNotEmpty(tx.contract_address);
+    });
+
+    // triggerSmartContract → TriggerSmartContract: a state-changing contract call. The node
+    // returns a { result, transaction } wrapper; createTransaction surfaces it as-is, and the
+    // built transaction targets the contract without being signed.
+    it('builds a triggerSmartContract call (setOwner) targeting a deployed contract', async function () {
+        const result: any = await publicClient.createTransaction({
+            type: 'triggerSmartContract',
+            parameters: [
+                revertAddress,
+                'setOwner(address)',
+                { funcABIV2: setOwnerFragment, parametersV2: [recipient] },
+                [],
+                owner,
+            ],
+        });
+
+        // triggerSmartContract returns a { result, transaction } wrapper, not a bare tx.
+        assert.isTrue(result.result.result, 'node should accept the trigger build');
+        const tx = result.transaction;
+        const parameter = paramOf(tx);
+        assert.equal(tx.txID.length, 64);
+        assert.equal(parameter.type_url, 'type.googleapis.com/protocol.TriggerSmartContract');
+        assert.equal(addrBody(parameter.value.owner_address), addrBody(owner));
+        assert.equal(addrBody(parameter.value.contract_address), addrBody(revertAddress));
+        // createTransaction only builds — the transaction must not be signed yet.
+        assert.isUndefined(tx.signature);
+    });
+});
+
