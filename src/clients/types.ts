@@ -427,6 +427,9 @@ export type SendTransactionConstantType =
     | 'estimateEnergy'
     | 'deployConstantContract';
 
+type ExtractTransaction<T> = T extends { transaction: infer U } ? U : T;
+
+type CoerceToTransaction<T> = T extends Transaction ? T : any;
 /**
  * Resolved return type of WalletClient.sendTransaction for a given action `type`.
  * Constant/read-only actions resolve to the action's own result; every other action
@@ -434,7 +437,7 @@ export type SendTransactionConstantType =
  */
 export type SendTransactionReturn<K extends CreateTransactionType = CreateTransactionType> = K extends SendTransactionConstantType
     ? Awaited<ReturnType<(typeof tbActions)[K]>>
-    : BroadcastReturn<SignedTransaction>;
+    : BroadcastReturn<CoerceToTransaction<ExtractTransaction<Awaited<ReturnType<(typeof tbActions)[K]>>>> & { signature: string[] }>;
 
 /**
  * Resolved return type of PublicClientActions.createTransaction for a given
