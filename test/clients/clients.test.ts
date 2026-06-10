@@ -554,6 +554,38 @@ describe('client factories', function () {
         );
     });
 
+    it('rejects a call value beyond the safe integer range (number guard)', async function () {
+        // A plain number above 2^53 would be silently truncated by the downstream parseInt
+        // (e.g. 2 ** 60 -> a corrupted call_value); resolveCallValue rejects it up front.
+        const walletClient = createWalletClient({ account, fullHost: FULL_NODE_API });
+        const publicClient = createPublicClient({ fullHost: FULL_NODE_API });
+        const huge = 2 ** 60; // > Number.MAX_SAFE_INTEGER as a plain number
+
+        await assertRejectsWithMessage(
+            () =>
+                walletClient.writeContract({
+                    address: account.address,
+                    abi: revertFixture.abi as any,
+                    functionName: 'setOwner',
+                    args: [account.address],
+                    value: huge,
+                } as any),
+            'call value exceeds safe integer range'
+        );
+        await assertRejectsWithMessage(
+            () =>
+                publicClient.readContract({
+                    address: account.address,
+                    abi: revertFixture.abi as any,
+                    functionName: 'getOwner',
+                    args: [1],
+                    value: huge,
+                    account: account.address,
+                } as any),
+            'call value exceeds safe integer range'
+        );
+    });
+
     it('rejects a negative call value', async function () {
         // resolveCallValue throws before any node request, so a negative value is
         // rejected regardless of the contract/method targeted (no deploy needed).
