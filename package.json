@@ -118,7 +118,7 @@
         "karma-spec-reporter": "0.0.36",
         "karma-webpack": "5.0.1",
         "mocha": "11.1.0",
-        "nyc": "17.1.0",
+        "nyc": "18.0.0",
         "prettier": "3.5.3",
         "puppeteer": "24.23.0",
         "querystring-es3": "0.2.1",
@@ -138,7 +138,8 @@
     "license": "MIT",
     "repository": "https://github.com/tronprotocol/tronweb.git",
     "overrides": {
-        "serialize-javascript": "7.0.5"
+        "serialize-javascript": "7.0.5",
+        "ws": "8.21.0"
     },
     "sideEffects": [
         "**/protocol/core/**/*.cjs"
