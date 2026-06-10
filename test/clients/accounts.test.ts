@@ -168,7 +168,7 @@ describe('privateKeyToAccount', function () {
     it('rejects an odd-length hex raw message instead of silently padding it', async function () {
         await assertRejectsWithMessage(
             () => account.signMessage({ message: { raw: '0xabc' as `0x${string}` } }),
-            'Invalid raw message: hex string must have an even number of digits'
+            'The passed value is not an even length hex string'
         );
     });
 
