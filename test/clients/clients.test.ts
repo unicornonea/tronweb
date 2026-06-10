@@ -2,7 +2,7 @@ import { assert } from 'chai';
 
 import { privateKeyToAccount } from '../../src/clients/accounts/privateKeyToAccount.js';
 import { fromHex, toHex } from '../../src/utils/address.js';
-import { sha3 } from '../../src/utils/crypto.js';
+import { sha3, signTransaction as signTransactionCrypto } from '../../src/utils/crypto.js';
 import { encodeParams } from '../../src/utils/abi.js';
 import { createPublicClient } from '../../src/clients/createPublicClient.js';
 import { createWalletClient } from '../../src/clients/createWalletClient.js';
@@ -884,6 +884,80 @@ describe('client factories', function () {
                 )
             );
         });
+    });
+});
+
+// recoverTransactionAddress is the signing counterpart of verify: given a signed
+// transaction it recovers the signer address from each signature over the txID.
+// It first runs txCheck (raw_data/txID consistency), so the transactions are built
+// on a real node; the low-level signer then appends signatures offline.
+describe('recoverTransactionAddress — live TRE @9090', function () {
+    this.timeout(120000);
+    const FULL_HOST = liveConfig.FULL_NODE_API;
+    const publicClient = createPublicClient({ fullHost: FULL_HOST });
+    const fullNode = new HttpProvider(FULL_HOST);
+
+    let signerAPk: string;
+    let signerBPk: string;
+    let signerAAddress: string;
+    let signerBAddress: string;
+    let baseTx: any; // valid, unsigned sendTrx transaction reused (via clone) across tests
+
+    before(async function () {
+        this.timeout(120000);
+        const accounts = await tronWebBuilder.getTestAccounts(-1);
+        const valid = accounts.pks
+            .map((pk: string, i: number) => ({ pk: pk.replace(/^0x/, ''), b58: accounts.b58[i] }))
+            .filter((a: { pk: string }) => /^[0-9a-fA-F]{64}$/.test(a.pk));
+
+        signerAPk = valid[0].pk;
+        signerAAddress = valid[0].b58;
+        signerBPk = valid[1].pk;
+        signerBAddress = valid[1].b58;
+
+        baseTx = await tbActions.sendTrx(fullNode, valid[2].b58, 1_000_000, signerAAddress);
+    });
+
+    const clone = (tx: any) => JSON.parse(JSON.stringify(tx));
+
+    async function assertRejectsWithMessage(action: () => Promise<unknown>, message: string) {
+        try {
+            await action();
+            assert.fail(`Expected rejection with message: ${message}`);
+        } catch (error) {
+            assert.instanceOf(error, Error);
+            assert.equal((error as Error).message, message);
+        }
+    }
+
+    it('recovers the single signer address for a singly-signed transaction', async function () {
+        const transaction = signTransactionCrypto(signerAPk, clone(baseTx));
+        const recovered = await publicClient.recoverTransactionAddress({ transaction });
+        assert.equal(recovered, signerAAddress);
+    });
+
+    it('recovers an address array for a multi-signed transaction', async function () {
+        const transaction = clone(baseTx);
+        signTransactionCrypto(signerAPk, transaction);
+        signTransactionCrypto(signerBPk, transaction);
+        const recovered = await publicClient.recoverTransactionAddress({ transaction });
+        assert.deepEqual(recovered, [signerAAddress, signerBAddress]);
+    });
+
+    it('throws Invalid transaction when txCheck fails (tampered txID)', async function () {
+        const transaction = signTransactionCrypto(signerAPk, clone(baseTx)) as any;
+        transaction.txID = (transaction.txID[0] === '0' ? '1' : '0') + transaction.txID.slice(1);
+        await assertRejectsWithMessage(
+            () => publicClient.recoverTransactionAddress({ transaction }),
+            'Invalid transaction'
+        );
+    });
+
+    it('throws Transaction is not signed when there are no signatures', async function () {
+        await assertRejectsWithMessage(
+            () => publicClient.recoverTransactionAddress({ transaction: clone(baseTx) }),
+            'Transaction is not signed'
+        );
     });
 });
 

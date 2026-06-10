@@ -17,6 +17,7 @@ import type {
     CreateTransactionType,
     CreateTransactionParams,
     CreateTransactionReturn,
+    RecoverTransactionAddressParameters,
 } from './types.js';
 import type { ContractAbiInterface, EventFragment, FunctionFragment } from '../types/ABI.js';
 import type { Chain } from './chains.js';
@@ -26,7 +27,9 @@ import type { TransactionWrapper } from '../types/Transaction.js';
 import type { HttpProvider } from '../lib/providers/index.js';
 import { buildFunctionSelector, decodeParamsV2ByABI, isReadOnlyFunctionFragment, resolveFunctionFragment } from '../utils/abi.js';
 import { toUtf8 } from '../utils/bytes.js';
-import { toHex } from '../utils/address.js';
+import { fromHex, toHex } from '../utils/address.js';
+import { ecRecover } from '../utils/crypto.js';
+import { txCheck } from '../utils/transaction.js';
 import { verifyMessage as recoverMessageAddress } from '../utils/message.js';
 import { verifyTypedData as recoverTypedDataAddress } from '../utils/typedData.js';
 import { ADDRESS_PREFIX } from '../utils/constants.js';
@@ -519,6 +522,17 @@ export function createClientQueryActions({
             const recovered = recoverTypedDataAddress(domain, types as any, message, signature);
             const recoveredAddress = `${ADDRESS_PREFIX}${recovered.slice(2)}`;
             return recoveredAddress.toLowerCase() === toHex(address).toLowerCase();
+        },
+        recoverTransactionAddress: async ({ transaction }: RecoverTransactionAddressParameters) => {
+            if (!txCheck(transaction)) {
+                throw new Error('Invalid transaction');
+            }
+            const signatures = transaction.signature;
+            if (!signatures?.length) {
+                throw new Error('Transaction is not signed');
+            }
+            const addresses = signatures.map((signature) => fromHex(ecRecover(transaction.txID, signature)));
+            return addresses.length > 1 ? addresses : addresses[0];
         },
     };
 }

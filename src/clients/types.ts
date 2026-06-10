@@ -63,6 +63,12 @@ export interface VerifyTypedDataParameters extends SignTypedDataParameters {
     readonly signature: Hex | string;
 }
 
+export interface RecoverTransactionAddressParameters {
+    readonly transaction: SignedTransaction;
+}
+
+export type RecoverTransactionAddressReturnType = string | string[];
+
 export interface CallParameters {
     readonly to: string;
     readonly data?: Hex;
@@ -316,6 +322,15 @@ export interface PublicClientActions {
     ) => Promise<ReadContractReturnType<Abi, FunctionName>>;
     readonly verifyMessage: (input: VerifyMessageParameters) => Promise<boolean>;
     readonly verifyTypedData: (input: VerifyTypedDataParameters) => Promise<boolean>;
+    /**
+     * Recover the signer address(es) of a signed transaction from its
+     * signature(s) over the txID. Throws if the transaction carries no
+     * signatures. Returns a single base58 address for a singly-signed
+     * transaction, or an array of addresses for a multi-signed one.
+     */
+    readonly recoverTransactionAddress: (
+        input: RecoverTransactionAddressParameters
+    ) => Promise<RecoverTransactionAddressReturnType>;
     /**
      * Build a transaction-builder action's transaction (without signing or
      * broadcasting). `type` selects an action; `parameters` are its positional
