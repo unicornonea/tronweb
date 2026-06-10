@@ -101,6 +101,8 @@ export type BitsRange = Range<8, 256, 8>;
 
 export type Numbers = bigint | number;
 
+export type IsAny<T> = 0 extends 1 & T ? true : false;
+
 type ConvertToNumber<T extends string> = T extends `${infer Num extends number}` ? Num : never;
 
 type FixedSizeArray<T, Length extends number> = _GrowArr<Length, T>;
@@ -260,7 +262,7 @@ type _GetOutputsType<Outputs extends ReadonlyArray<AbiParamsCommon> | undefined>
         : []
     : [];
 
-export type GetOutputsType<Outputs extends ReadonlyArray<AbiParamsCommon> | undefined> = GetTupleOutputType<'tuple', Outputs>;
+export type GetOutputsType<Outputs extends ReadonlyArray<AbiParamsCommon> | undefined> = IsAny<Outputs> extends true ? any : GetTupleOutputType<'tuple', Outputs>;
 
 
 export type GetMethodsTypeFromAbi<Abi extends ContractAbiInterface> = Abi extends readonly [infer T, ...infer P]

@@ -1,4 +1,4 @@
-import type { ContractAbiInterface, EventFragment, FunctionFragment, GetOnMethodTypeFromAbi } from '../types/ABI.js';
+import type { ContractAbiInterface, EventFragment, FunctionFragment, GetOnMethodTypeFromAbi, IsAny } from '../types/ABI.js';
 import type {
     EstimateContractGasParameters,
     EstimateContractGasReturnType,
@@ -90,47 +90,71 @@ type GetEventsOptions<
     TEventName extends EventName<Abi>,
 > = Omit<GetContractEventsParameters<Abi, TEventName>, 'address' | 'abi' | 'eventName' | 'args'>;
 
-type ContractReadNamespace<Abi extends ContractAbiInterface> = {
-    [K in ReadFunctionName<Abi>]: (
-        argsOrOptions?: ReadContractParameters<Abi, K>['args'] | ReadOptions<Abi, K>,
-        options?: ReadOptions<Abi, K>
-    ) => Promise<ReadContractReturnType<Abi, K>>;
-};
+/**
+ * True when the ABI is a fixed-length tuple (declared with `as const`).
+ * Without `as const` the ABI widens to `AbiFragment[]` — `length` becomes
+ * `number` and fragment names/stateMutability lose their literal types, so
+ * no method names can be derived from it. `any` also fails this check.
+ */
+type IsConstAbi<Abi extends ContractAbiInterface> = IsAny<Abi> extends true
+    ? false
+    : number extends Abi['length']
+      ? false
+      : true;
 
-type ContractWriteNamespace<Abi extends ContractAbiInterface> = {
-    [K in WriteFunctionName<Abi>]: (
-        argsOrOptions?: WriteContractParameters<Abi, K>['args'] | WriteOptions<Abi, K>,
-        options?: WriteOptions<Abi, K>
-    ) => Promise<WriteContractReturnType>;
-};
+type ContractCallInterface = (...args: any[]) => Promise<any>;
 
-type ContractEstimateGasNamespace<Abi extends ContractAbiInterface> = {
-    [K in WriteFunctionName<Abi>]: (
-        argsOrOptions?: EstimateContractGasParameters<Abi, K>['args'] | EstimateGasOptions<Abi, K>,
-        options?: EstimateGasOptions<Abi, K>
-    ) => Promise<EstimateContractGasReturnType>;
-};
+type ContractReadNamespace<Abi extends ContractAbiInterface> = IsConstAbi<Abi> extends true
+    ? {
+        [K in ReadFunctionName<Abi>]: (
+            argsOrOptions?: ReadContractParameters<Abi, K>['args'] | ReadOptions<Abi, K>,
+            options?: ReadOptions<Abi, K>
+        ) => Promise<ReadContractReturnType<Abi, K>>;
+    }
+    : Record<string, ContractCallInterface>;
 
-type ContractGetEventsNamespace<Abi extends ContractAbiInterface> = {
-    [K in EventName<Abi>]: (
-        argsOrOptions?: GetContractEventsParameters<Abi, K>['args'] | readonly unknown[] | GetEventsOptions<Abi, K>,
-        options?: GetEventsOptions<Abi, K>
-    ) => Promise<GetContractEventsReturnType>;
-};
+type ContractWriteNamespace<Abi extends ContractAbiInterface> = IsConstAbi<Abi> extends true
+    ? {
+        [K in WriteFunctionName<Abi>]: (
+            argsOrOptions?: WriteContractParameters<Abi, K>['args'] | WriteOptions<Abi, K>,
+            options?: WriteOptions<Abi, K>
+        ) => Promise<WriteContractReturnType>;
+    }
+    : Record<string, ContractCallInterface>;
+
+type ContractEstimateGasNamespace<Abi extends ContractAbiInterface> = IsConstAbi<Abi> extends true
+    ? {
+        [K in WriteFunctionName<Abi>]: (
+            argsOrOptions?: EstimateContractGasParameters<Abi, K>['args'] | EstimateGasOptions<Abi, K>,
+            options?: EstimateGasOptions<Abi, K>
+        ) => Promise<EstimateContractGasReturnType>;
+    }
+    : Record<string, ContractCallInterface>;
+
+type ContractGetEventsNamespace<Abi extends ContractAbiInterface> = IsConstAbi<Abi> extends true
+    ? {
+        [K in EventName<Abi>]: (
+            argsOrOptions?: GetContractEventsParameters<Abi, K>['args'] | readonly unknown[] | GetEventsOptions<Abi, K>,
+            options?: GetEventsOptions<Abi, K>
+        ) => Promise<GetContractEventsReturnType>;
+    }
+    : Record<string, ContractCallInterface>;
 
 /**
  * The result type of `getContract` — every ABI function mapped to a
  * directly-callable async function (no `.call()` / `.send()` needed).
  */
-type FlatContractFunctions<Abi extends ContractAbiInterface> = {
-    [K in keyof OnMethods<Abi>]: Abi extends readonly (infer F)[]
-        ? F extends FunctionFragment
-            ? F['name'] extends K
-                ? WrappedMethod<OnMethods<Abi>[K], F>
+type FlatContractFunctions<Abi extends ContractAbiInterface> = IsConstAbi<Abi> extends true
+    ? {
+        [K in keyof OnMethods<Abi>]: Abi extends readonly (infer F)[]
+            ? F extends FunctionFragment
+                ? F['name'] extends K
+                    ? WrappedMethod<OnMethods<Abi>[K], F>
+                    : WrappedMethod<OnMethods<Abi>[K], never>
                 : WrappedMethod<OnMethods<Abi>[K], never>
-            : WrappedMethod<OnMethods<Abi>[K], never>
-        : WrappedMethod<OnMethods<Abi>[K], never>;
-};
+            : WrappedMethod<OnMethods<Abi>[K], never>;
+    }
+    : Record<string, ContractCallInterface>;
 
 export type ContractFunctions<
     Abi extends ContractAbiInterface,
@@ -141,7 +165,7 @@ export type ContractFunctions<
     readonly read: ContractReadNamespace<Abi>;
     readonly estimateGas: ContractEstimateGasNamespace<Abi>;
     readonly getEvents: ContractGetEventsNamespace<Abi>;
-} & (TClient extends WalletClient ? { readonly write: ContractWriteNamespace<Abi> } : Record<string, never>);
+} & (TClient extends WalletClient ? { readonly write: ContractWriteNamespace<Abi> } : {});
 
 // ─── Runtime ─────────────────────────────────────────────────────────────────
 
