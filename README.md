@@ -49,7 +49,7 @@ You can access either version specifically from the dist folder.
 TronWeb is also compatible with frontend frameworks such as:
 - Angular
 - React
-- Vue.
+- Vue
 
 You can also ship TronWeb in a Chrome extension.
 
@@ -74,24 +74,24 @@ yarn add tronweb
 ### Browser
 
 The easiest way to use TronWeb in a browser is to install it as above and copy the dist file to your working folder. For example:
-```
+```bash
 cp node_modules/tronweb/dist/TronWeb.js ./js/tronweb.js
 ```
 so that you can call it in your HTML page as
-```
-<script src="./js/tronweb.js"><script>
+```html
+<script src="./js/tronweb.js"></script>
 ```
 
 This project is also published on NPM and you can access CDN mirrors of this release (please use sub-resource integrity for any `<script>` includes).
 
 ## Testnet
 
-Shasta is the official Tron testnet. To use it use the following endpoint:
+Nile is a Tron testnet. To use it use the following endpoint:
 ```
-https://api.shasta.trongrid.io
+https://nile.trongrid.io
 ```
-Get some Shasta TRX at https://www.trongrid.io/shasta and play with it.
-Anything you do should be explorable on https://shasta.tronscan.org
+Get some Nile TRX at https://nileex.io/join/getJoinPage and play with it.
+Anything you do should be explorable on https://nile.tronscan.org
 
 ## Your local private network for heavy testing
 
@@ -128,7 +128,7 @@ you can also set a
 
 * fullHost
 
-which works as a jolly. If you do so, though, the more precise specification has priority.
+which works as a fallback for all of them. If you do so, though, the more precise specification has priority.
 Supposing you are using a server which provides everything, like TronGrid, you can instantiate TronWeb as:
 
 ```js
@@ -167,11 +167,9 @@ const tronWeb = new TronWeb({
 )
 ```
 
-### Viem-Style Account, Client & Contract Factories
+### Account, Client & Contract Factories
 
 If you prefer a factory-based workflow, TronWeb also supports additive account, client, and contract factories. This does not replace any existing `new TronWeb(...)` usage.
-
-For the current full compatibility summary, see `TRONWEB_VIEM_FULL_ALIGNMENT_COMPARISON.md`.
 
 #### Account abstraction
 
@@ -190,7 +188,7 @@ The returned account exposes:
 The private key stays encapsulated and is never exposed on the returned object.
 
 ```ts
-import { privateKeyToAccount } from 'tronweb'
+import { privateKeyToAccount } from 'tronweb/clients'
 
 const account = privateKeyToAccount('0xyour-private-key')
 
@@ -209,7 +207,7 @@ Recover helpers remain on existing TronWeb utilities instead of being duplicated
 
 #### Client factories
 
-Current built-in chains are available from `tronweb/chains`:
+Current built-in chains are available from `tronweb/clients`:
 
 - `mainnet` -> chainId `728126428` -> `https://api.trongrid.io`
 - `nile` -> chainId `3448148188` -> `https://nile.trongrid.io`
@@ -218,11 +216,10 @@ Current built-in chains are available from `tronweb/chains`:
 Currently, `http()` is the only supported transport. The transport layer is kept separate so more transports can be added later without breaking existing TronWeb APIs.
 The `chain.id` field stores the numeric chainId.
 
-Both `createPublicClient(...)` and `createWalletClient(...)` expose client metadata (`key`, `name`, `type`, `uid`) along with `chain`, `transport`, `trx`, and `transactionBuilder`.
+Both `createPublicClient(...)` and `createWalletClient(...)` expose client metadata (`key`, `name`, `type`, `uid`) along with `chain` and `transport`.
 
 ```ts
-import { createPublicClient, http } from 'tronweb'
-import { mainnet } from 'tronweb/chains'
+import { createPublicClient, http, mainnet } from 'tronweb/clients'
 
 const publicClient = createPublicClient({
   chain: mainnet,
@@ -236,6 +233,7 @@ const block = await publicClient.getBlock({ blockTag: 'latest' })
 
 Current top-level public client helpers:
 
+- `createTransaction`
 - `getAccount`
 - `getBalance`
 - `getBlock`
@@ -255,6 +253,7 @@ Current top-level public client helpers:
 - `getContractEvents`
 - `verifyMessage`
 - `verifyTypedData`
+- `recoverTransactionAddress`
 
 These top-level helpers support both the current scalar form and an object-style form where it makes sense.
 
@@ -270,8 +269,7 @@ Examples:
 You can still override the default endpoint explicitly:
 
 ```ts
-import { createPublicClient, http } from 'tronweb'
-import { mainnet } from 'tronweb/chains'
+import { createPublicClient, http, mainnet } from 'tronweb/clients'
 
 const publicClient = createPublicClient({
   chain: mainnet,
@@ -282,7 +280,7 @@ const publicClient = createPublicClient({
 If you need a custom chain definition, you can keep the same style and define one without affecting the legacy TronWeb constructor flow:
 
 ```ts
-import { createPublicClient, defineChain, http } from 'tronweb'
+import { createPublicClient, defineChain, http } from 'tronweb/clients'
 
 const privateChain = defineChain({
   id: 728126428,
@@ -311,8 +309,7 @@ const publicClient = createPublicClient({
 `createWalletClient(...)` extends the read/query surface with top-level wallet actions.
 
 ```ts
-import { createWalletClient, http, privateKeyToAccount } from 'tronweb'
-import { nile } from 'tronweb/chains'
+import { createWalletClient, http, privateKeyToAccount, nile } from 'tronweb/clients'
 
 const account = privateKeyToAccount('0xyour-private-key')
 
@@ -374,8 +371,8 @@ import {
   createWalletClient,
   http,
   privateKeyToAccount,
-} from 'tronweb'
-import { mainnet } from 'tronweb/chains'
+  mainnet,
+} from 'tronweb/clients'
 
 const client = createWalletClient({
   account: privateKeyToAccount('0xyour-private-key'),
@@ -454,7 +451,6 @@ const txId = await walletClient.writeContract({
   abi: TRC20_ABI,
   functionName: 'transfer',
   args: [recipientAddress, 1_000_000n],
-  account: account.address,
   feeLimit: 100_000_000,
 })
 ```
@@ -534,7 +530,7 @@ The most important differences to remember are:
 1. Cannot destructure property 'Transaction' of 'globalThis.TronWebProto' as it is undefined.
 
 This is a problem caused by webpack as it doesn't load cjs file correctly. To solve this problem, you need to add a new rule like below:
-```
+```js
 {
       test: /\.cjs$/,
       type: 'javascript/auto'
@@ -560,7 +556,7 @@ In order to contribute you can
 * install the dependencies — `npm i`
 * do your changes to the code
 * build the TronWeb dist files — `npm run build:all`
-* run a local private network using Tron Quickstart
+* run a local private network using TRE
 * run the tests — `npm run test`
 * push your changes and open a pull request
 
