@@ -4,7 +4,7 @@ import type { Block, GetTransactionResponse } from '../types/APIResponse.js';
 import type { Hex, SignTypedDataParameters, SignableMessage, WalletAccount } from './accounts/types.js';
 import type { Chain } from './chains.js';
 import type { Transport } from './transports/index.js';
-import type { ContractAbiInterface, EventFragment, FunctionFragment, GetOutputsType, GetParamsType } from '../types/ABI.js';
+import type { ContractAbiInterface, EventFragment, FunctionFragment, GetOutputsType, GetParamsType, IsConstAbi } from '../types/ABI.js';
 import type { EventResponse, GetEventResultOptions } from '../types/Event.js';
 import type { SignedTransaction, Transaction } from '../types/Transaction.js';
 import type { TronWebOptions } from '../types/TronWeb.js';
@@ -159,11 +159,7 @@ type WriteContractInputs<
 
 type CollapseSingleItemTuple<Value> = Value extends readonly [infer Only] ? Only : Value;
 
-type IsNever<T> = [T] extends [never] ? true : false;
-
-type ChangeNeverToAnyArray<T> = IsNever<T> extends true ? any[] : T;
-
-type ChangeNeverToAny<T> = IsNever<T> extends true ? any : T;
+export type IsNever<T> = [T] extends [never] ? true : false;
 
 type ChangeNeverToString<T> = IsNever<T> extends true ? string : T;
 
@@ -174,7 +170,7 @@ export type ReadContractParameters<
     readonly address: string;
     readonly abi: Abi;
     readonly functionName: ChangeNeverToString<FunctionName>;
-    readonly args?: ChangeNeverToAnyArray<GetParamsType<ReadContractInputs<Abi, FunctionName>>>;
+    readonly args?: IsConstAbi<Abi> extends true ? GetParamsType<ReadContractInputs<Abi, FunctionName>> : any[];
     readonly account?: string;
     readonly value?: number | bigint;
 };
@@ -182,7 +178,7 @@ export type ReadContractParameters<
 export type ReadContractReturnType<
     Abi extends ContractAbiInterface = ContractAbiInterface,
     FunctionName extends ReadContractFunctionName<Abi> = ReadContractFunctionName<Abi>,
-> = ChangeNeverToAny<CollapseSingleItemTuple<GetOutputsType<ReadContractOutputs<Abi, FunctionName>>>>;
+> = IsConstAbi<Abi> extends true ? CollapseSingleItemTuple<GetOutputsType<ReadContractOutputs<Abi, FunctionName>>> : any;
 
 export type EstimateContractGasParameters<
     Abi extends ContractAbiInterface = ContractAbiInterface,
@@ -191,7 +187,7 @@ export type EstimateContractGasParameters<
     readonly address: string;
     readonly abi: Abi;
     readonly functionName: ChangeNeverToString<FunctionName>;
-    readonly args?: ChangeNeverToAnyArray<GetParamsType<ReadContractInputs<Abi, FunctionName>>>;
+    readonly args?: IsConstAbi<Abi> extends true ? GetParamsType<ReadContractInputs<Abi, FunctionName>> : any[];
     readonly account?: string;
     readonly value?: number | bigint;
 };
@@ -221,7 +217,7 @@ export type WriteContractParameters<
     readonly address: string;
     readonly abi: Abi;
     readonly functionName: ChangeNeverToString<FunctionName>;
-    readonly args?: ChangeNeverToAnyArray<GetParamsType<WriteContractInputs<Abi, FunctionName>>>;
+    readonly args?: IsConstAbi<Abi> extends true ? GetParamsType<WriteContractInputs<Abi, FunctionName>> : any[];
     readonly account?: string;
     readonly value?: number | bigint;
     readonly feeLimit?: number;

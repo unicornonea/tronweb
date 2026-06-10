@@ -103,6 +103,18 @@ export type Numbers = bigint | number;
 
 export type IsAny<T> = 0 extends 1 & T ? true : false;
 
+/**
+ * True when the ABI is a fixed-length tuple (declared with `as const`).
+ * Without `as const` the ABI widens to `AbiFragment[]` — `length` becomes
+ * `number` and fragment names/stateMutability lose their literal types, so
+ * no method names can be derived from it. `any` also fails this check.
+ */
+export type IsConstAbi<Abi extends ContractAbiInterface> = IsAny<Abi> extends true
+    ? false
+    : number extends Abi['length']
+      ? false
+      : true;
+
 type ConvertToNumber<T extends string> = T extends `${infer Num extends number}` ? Num : never;
 
 type FixedSizeArray<T, Length extends number> = _GrowArr<Length, T>;
@@ -232,7 +244,9 @@ export type GetParamsType<ParamsType extends ReadonlyArray<AbiParamsCommon> | un
                 ? [SimplifySolidityType<SolidityValueType<T['type'], T['components']>>, ...GetParamsType<P>]
                 : [SimplifySolidityType<SolidityValueType<T['type'], T['components']>>]
         : []
-    : any[];
+    : ParamsType extends readonly []
+        ? []
+        : any[];
 
 type GetTupleOutputType<T extends `tuple${string}`, Shape extends ReadonlyArray<AbiParamsCommon> | undefined> = T extends 'tuple'
     ? Shape extends ReadonlyArray<AbiParamsCommon>

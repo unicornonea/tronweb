@@ -1,4 +1,4 @@
-import type { ContractAbiInterface, EventFragment, FunctionFragment, GetOnMethodTypeFromAbi, IsAny } from '../types/ABI.js';
+import type { ContractAbiInterface, EventFragment, FunctionFragment, GetOnMethodTypeFromAbi, IsConstAbi } from '../types/ABI.js';
 import type {
     EstimateContractGasParameters,
     EstimateContractGasReturnType,
@@ -46,7 +46,17 @@ type WrappedMethod<OnMethodFn, Fragment> = OnMethodFn extends (...args: infer A)
         : (...args: A) => Promise<string>
     : (...args: any[]) => Promise<any>;
 
-type OnMethods<Abi extends ContractAbiInterface> = Omit<GetOnMethodTypeFromAbi<Abi>, ReservedContractInstanceKey>;
+type RemoveIndexSignature<T> = {
+    [K in keyof T as string extends K
+        ? never
+        : number extends K
+          ? never
+          : symbol extends K
+            ? never
+            : K]: T[K];
+};
+
+type OnMethods<Abi extends ContractAbiInterface> = Omit<RemoveIndexSignature<GetOnMethodTypeFromAbi<Abi>>, ReservedContractInstanceKey>;
 
 type ReadFunctionName<Abi extends ContractAbiInterface> = Abi[number] extends infer Fragment
     ? Fragment extends FunctionFragment
@@ -90,18 +100,6 @@ type GetEventsOptions<
     TEventName extends EventName<Abi>,
 > = Omit<GetContractEventsParameters<Abi, TEventName>, 'address' | 'abi' | 'eventName' | 'args'>;
 
-/**
- * True when the ABI is a fixed-length tuple (declared with `as const`).
- * Without `as const` the ABI widens to `AbiFragment[]` — `length` becomes
- * `number` and fragment names/stateMutability lose their literal types, so
- * no method names can be derived from it. `any` also fails this check.
- */
-type IsConstAbi<Abi extends ContractAbiInterface> = IsAny<Abi> extends true
-    ? false
-    : number extends Abi['length']
-      ? false
-      : true;
-
 type ContractCallInterface = (...args: any[]) => Promise<any>;
 
 type ContractReadNamespace<Abi extends ContractAbiInterface> = IsConstAbi<Abi> extends true
@@ -140,19 +138,18 @@ type ContractGetEventsNamespace<Abi extends ContractAbiInterface> = IsConstAbi<A
     }
     : Record<string, ContractCallInterface>;
 
+type GetAbiItemByName<Abi extends ContractAbiInterface, Name extends string | number | symbol> = Abi[number] extends infer F
+    ? F extends { name: Name }
+        ? F
+        : never
+    : never;
 /**
  * The result type of `getContract` — every ABI function mapped to a
  * directly-callable async function (no `.call()` / `.send()` needed).
  */
 type FlatContractFunctions<Abi extends ContractAbiInterface> = IsConstAbi<Abi> extends true
     ? {
-        [K in keyof OnMethods<Abi>]: Abi extends readonly (infer F)[]
-            ? F extends FunctionFragment
-                ? F['name'] extends K
-                    ? WrappedMethod<OnMethods<Abi>[K], F>
-                    : WrappedMethod<OnMethods<Abi>[K], never>
-                : WrappedMethod<OnMethods<Abi>[K], never>
-            : WrappedMethod<OnMethods<Abi>[K], never>;
+        [K in keyof OnMethods<Abi>]: WrappedMethod<OnMethods<Abi>[K], GetAbiItemByName<Abi, K>>
     }
     : Record<string, ContractCallInterface>;
 
