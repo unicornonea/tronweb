@@ -157,7 +157,7 @@ type WriteContractInputs<
     ? WriteContractFragment<Abi, FunctionName>['inputs']
     : undefined;
 
-type CollapseSingleItemTuple<Value> = Value extends readonly [infer Only] ? Only : Value;
+export type CollapseSingleItemTuple<Value> = Value extends readonly [infer Only] ? Only : Value;
 
 export type IsNever<T> = [T] extends [never] ? true : false;
 

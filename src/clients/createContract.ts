@@ -1,5 +1,6 @@
-import type { ContractAbiInterface, EventFragment, FunctionFragment, GetOnMethodTypeFromAbi, IsConstAbi } from '../types/ABI.js';
+import type { ContractAbiInterface, EventFragment, FunctionFragment, GetOnMethodTypeFromAbi, GetOutputsType, GetParamsType, IsConstAbi } from '../types/ABI.js';
 import type {
+    CollapseSingleItemTuple,
     EstimateContractGasParameters,
     EstimateContractGasReturnType,
     GetContractEventsParameters,
@@ -27,24 +28,6 @@ type IsReadOnly<F> = F extends FunctionFragment
             ? true
             : false
     : false;
-
-/** Extract the return type of the `.call()` method from an `onMethod` function */
-type CallReturnOf<F> = F extends (...args: any[]) => { call: infer C }
-    ? C extends (...args: any[]) => infer R
-        ? R
-        : Promise<any>
-    : Promise<any>;
-
-/**
- * For each ABI function:
- * - view/pure → (...args) => CallReturnOf (direct result)
- * - non-view/pure → (...args) => Promise<string> (txID, requires WalletClient)
- */
-type WrappedMethod<OnMethodFn, Fragment> = OnMethodFn extends (...args: infer A) => any
-    ? IsReadOnly<Fragment> extends true
-        ? (...args: A) => CallReturnOf<OnMethodFn>
-        : (...args: A) => Promise<string>
-    : (...args: any[]) => Promise<any>;
 
 type RemoveIndexSignature<T> = {
     [K in keyof T as string extends K
@@ -143,14 +126,23 @@ type GetAbiItemByName<Abi extends ContractAbiInterface, Name extends string | nu
         ? F
         : never
     : never;
+
+type UnionToIntersection<U> = (U extends any ? (x: U) => void : never) extends (x: infer I) => void ? I : never;
+
+type WrapFragment<F extends FunctionFragment> = IsReadOnly<F> extends true
+    ? (...args: GetParamsType<F['inputs']>) => Promise<CollapseSingleItemTuple<GetOutputsType<F['outputs']>>>
+    : (...args: GetParamsType<F['inputs']>) => Promise<string>;
+
+type FlatMethod<Abi extends ContractAbiInterface, K extends string | number | symbol> = UnionToIntersection<
+    GetAbiItemByName<Abi, K> extends infer F ? (F extends FunctionFragment ? WrapFragment<F> : never) : never
+>;
+
 /**
  * The result type of `getContract` — every ABI function mapped to a
  * directly-callable async function (no `.call()` / `.send()` needed).
  */
 type FlatContractFunctions<Abi extends ContractAbiInterface> = IsConstAbi<Abi> extends true
-    ? {
-        [K in keyof OnMethods<Abi>]: WrappedMethod<OnMethods<Abi>[K], GetAbiItemByName<Abi, K>>
-    }
+    ? { [K in keyof OnMethods<Abi>]: FlatMethod<Abi, K> }
     : Record<string, ContractCallInterface>;
 
 export type ContractFunctions<
