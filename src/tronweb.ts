@@ -3,7 +3,7 @@ import type { Providers } from './lib/providers/index.js';
 import utils from './utils/index.js';
 import { BigNumber } from 'bignumber.js';
 import EventEmitter from 'eventemitter3';
-import semver from 'semver';
+import satisfies from 'semver/functions/satisfies.js';
 
 import { TransactionBuilder } from './lib/TransactionBuilder/TransactionBuilder.js';
 import { Trx } from './lib/trx/trx.js';
@@ -189,7 +189,7 @@ export class TronWeb extends EventEmitter {
     }
 
     fullnodeSatisfies(version: string) {
-        return semver.satisfies(this.fullnodeVersion, version);
+        return satisfies(this.fullnodeVersion, version);
     }
 
     isValidProvider(provider: unknown) {
