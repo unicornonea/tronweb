@@ -9,6 +9,14 @@ __6.5.2__
 
   `trx.sign(hexMessage, privateKey)`, `signMessageV2`, `signTypedData` / `_signTypedData`, `utils.message.signMessage` and `utils.typedData.signTypedData` used to hand the private key to ethers unchecked. A key that was not exactly 64 hex digits (a trailing newline from a `.env` file, a stripped leading zero, a `0X` prefix) made ethers throw an `INVALID_ARGUMENT` error that carried the full key in its message and `.value`, from where it reached logs and crash reporters. These entry points now validate the key first and throw a fixed `Invalid private key provided` that never includes the input. Accepted keys are unchanged: 64 hex digits in either case, with or without a lowercase `0x`, sign exactly as before. A missing default private key now fails with the same error instead of a `TypeError`.
 
+- Node-built transactions are checked against the requested contract type
+
+  `triggerSmartContract` (and every `contract.method().send()` / `contract.write` call) and `newTxID` (`extendExpiration`, `alterTransaction`, `addUpdateData` without `txLocal`) validate the transaction the fullNode returns by rebuilding it from the caller's own arguments and comparing the bytes. The rebuild took the contract type from the node's answer, so a malicious or compromised node could return a self-consistent transaction of another type whose fields are a subset of the request (a `ClearABIContract` or `UpdateSettingContract` in place of a contract call, a `TransferContract` in place of a `TransferAssetContract`, ...) and it was accepted and signed. The type is now pinned to the one requested, and a transaction that does not carry exactly one contract is rejected. Rejections keep the existing errors (`Invalid transaction`, `Error generating a new transaction id.`).
+
+  On the `newTxID` path the block header (`ref_block_bytes`, `ref_block_hash`, `expiration`, `timestamp`) is now pinned to the submitted values as well, as `multiSign` already did, so a node can no longer hand back a transaction with a later expiration or a ref block from another chain.
+
+  Genuine node answers are unaffected: `wallet/triggersmartcontract` always returns a `TriggerSmartContract`, and `wallet/getsignweight` re-serializes the submitted transaction (recomputing `txID` / `raw_data_hex`) and returns its contract type and block header as sent; `extendExpiration` sets the new expiration locally before calling it. `utils.transaction.txCheckWithArgs` gains an optional fourth `expectedType` argument. Its three-argument form behaves as before, except that a transaction whose `raw_data.contract` does not hold exactly one entry now returns `false`: previously a missing or empty contract list threw a `TypeError`, and contracts beyond the first were ignored.
+
 __6.5.1__
 
 ## Improvements

@@ -1,0 +1,172 @@
+import { assert } from 'vitest';
+import { TronWeb, utils } from '../setup/TronWeb.js';
+import { txJsonToPb, txPbToTxID, txPbToRawDataHex, txCheckWithArgs } from '../../src/utils/transaction.js';
+import { ContractType } from '../../src/types/Contract.js';
+
+const OWNER = '41e552f6487585c2b58bc2c9bb4492bc1f17132cd0';
+const CONTRACT = '41a614f803b6fd780986a42c78ec9c7f77e6ded13c';
+const HEADER = {
+    ref_block_bytes: 'abcd',
+    ref_block_hash: '0011223344556677',
+    expiration: 1_700_000_060_000,
+    timestamp: 1_700_000_000_000,
+};
+
+// A transaction whose txID / raw_data_hex are derived from its own JSON, exactly as a
+// (possibly malicious) node would return it: self-consistent, whatever the contract type.
+function selfConsistent(type: string, value: Record<string, unknown>, extra: Record<string, unknown> = {}) {
+    const tx: any = {
+        visible: false,
+        txID: '',
+        raw_data_hex: '',
+        raw_data: {
+            contract: [{ parameter: { value, type_url: `type.googleapis.com/protocol.${type}` }, type }],
+            ...HEADER,
+            ...extra,
+        },
+    };
+    const pb = txJsonToPb(tx);
+    tx.txID = txPbToTxID(pb).replace(/^0x/, '');
+    tx.raw_data_hex = txPbToRawDataHex(pb).toLowerCase();
+    return tx;
+}
+
+describe('utils.transaction', function () {
+    describe('#txCheckWithArgs', function () {
+        const withdrawArgs = { owner_address: OWNER };
+        const triggerArgs = {
+            owner_address: OWNER,
+            contract_address: CONTRACT,
+            function_selector: 'store(uint256)',
+            parameter: '0'.repeat(63) + '5',
+            fee_limit: 100_000_000,
+        };
+
+        it('is exported through utils.transaction', function () {
+            assert.strictEqual(utils.transaction.txCheckWithArgs, txCheckWithArgs);
+        });
+
+        describe('without expectedType (existing three-argument behaviour)', function () {
+            it('accepts a transaction rebuilt from the same args', function () {
+                const tx = selfConsistent('WithdrawBalanceContract', withdrawArgs);
+                assert.isTrue(txCheckWithArgs(tx, withdrawArgs, {}));
+            });
+
+            it('accepts a TriggerSmartContract rebuilt from the caller args', function () {
+                const tx = selfConsistent(
+                    'TriggerSmartContract',
+                    { owner_address: OWNER, contract_address: CONTRACT, data: 'dead' },
+                    { fee_limit: triggerArgs.fee_limit }
+                );
+                assert.isTrue(txCheckWithArgs(tx, { ...triggerArgs, data: 'dead' }, {}));
+            });
+
+            it('rejects a transaction whose parameter value differs from the args', function () {
+                const tx = selfConsistent('WithdrawBalanceContract', withdrawArgs);
+                assert.isFalse(txCheckWithArgs(tx, { owner_address: CONTRACT }, {}));
+            });
+
+            it('rejects a transaction whose raw_data_hex was tampered with', function () {
+                const tx = selfConsistent('WithdrawBalanceContract', withdrawArgs);
+                tx.raw_data_hex = tx.raw_data_hex.replace(/.$/, (c: string) => (c === '0' ? '1' : '0'));
+                assert.isFalse(txCheckWithArgs(tx, withdrawArgs, {}));
+            });
+
+            it('still accepts the same transaction when expectedType is undefined', function () {
+                const tx = selfConsistent('WithdrawBalanceContract', withdrawArgs);
+                assert.isTrue(txCheckWithArgs(tx, withdrawArgs, {}, undefined));
+            });
+        });
+
+        describe('with expectedType', function () {
+            it('accepts a transaction of the expected type', function () {
+                const tx = selfConsistent('WithdrawBalanceContract', withdrawArgs);
+                assert.isTrue(txCheckWithArgs(tx, withdrawArgs, {}, ContractType.WithdrawBalanceContract));
+                assert.isTrue(txCheckWithArgs(tx, withdrawArgs, {}, 'WithdrawBalanceContract'));
+            });
+
+            it('rejects a self-consistent transaction of another type built from the same args', function () {
+                // Both contract types carry only { owner_address }: the byte comparison alone passes.
+                const swapped = selfConsistent('CancelAllUnfreezeV2Contract', withdrawArgs);
+                assert.isTrue(txCheckWithArgs(swapped, withdrawArgs, {}), 'byte comparison alone passes');
+                assert.isFalse(txCheckWithArgs(swapped, withdrawArgs, {}, ContractType.WithdrawBalanceContract));
+            });
+
+            it('rejects a ClearABIContract returned for a TriggerSmartContract request', function () {
+                const swapped = selfConsistent(
+                    'ClearABIContract',
+                    { owner_address: OWNER, contract_address: CONTRACT },
+                    { fee_limit: triggerArgs.fee_limit }
+                );
+                assert.isTrue(txCheckWithArgs(swapped, triggerArgs, {}), 'byte comparison alone passes');
+                assert.isFalse(txCheckWithArgs(swapped, triggerArgs, {}, ContractType.TriggerSmartContract));
+            });
+
+            it('rejects an UpdateSettingContract returned for a TriggerSmartContract request', function () {
+                const swapped = selfConsistent(
+                    'UpdateSettingContract',
+                    { owner_address: OWNER, contract_address: CONTRACT },
+                    { fee_limit: triggerArgs.fee_limit }
+                );
+                assert.isTrue(txCheckWithArgs(swapped, triggerArgs, {}), 'byte comparison alone passes');
+                assert.isFalse(txCheckWithArgs(swapped, triggerArgs, {}, ContractType.TriggerSmartContract));
+            });
+
+            it('rejects a TransferContract returned for a TransferAssetContract (token amount read as sun)', function () {
+                const assetArgs = {
+                    owner_address: OWNER,
+                    to_address: CONTRACT,
+                    amount: 1000,
+                    asset_name: TronWeb.fromUtf8('1000001').replace(/^0x/, ''),
+                };
+                const swapped = selfConsistent('TransferContract', {
+                    owner_address: OWNER,
+                    to_address: CONTRACT,
+                    amount: 1000,
+                });
+                assert.isTrue(txCheckWithArgs(swapped, assetArgs, {}), 'byte comparison alone passes');
+                assert.isFalse(txCheckWithArgs(swapped, assetArgs, {}, ContractType.TransferAssetContract));
+            });
+
+            it('compares the type exactly (case and whitespace matter)', function () {
+                const tx = selfConsistent('WithdrawBalanceContract', withdrawArgs);
+                assert.isFalse(txCheckWithArgs(tx, withdrawArgs, {}, 'withdrawbalancecontract'));
+                assert.isFalse(txCheckWithArgs(tx, withdrawArgs, {}, 'WithdrawBalanceContract '));
+            });
+        });
+
+        describe('contract count', function () {
+            it('rejects a transaction with no contract', function () {
+                const tx = selfConsistent('WithdrawBalanceContract', withdrawArgs);
+                tx.raw_data.contract = [];
+                assert.isFalse(txCheckWithArgs(tx, withdrawArgs, {}));
+                assert.isFalse(txCheckWithArgs(tx, withdrawArgs, {}, ContractType.WithdrawBalanceContract));
+            });
+
+            it('rejects a transaction carrying a second contract, even if the first one matches', function () {
+                const tx = selfConsistent('WithdrawBalanceContract', withdrawArgs);
+                tx.raw_data.contract.push({
+                    parameter: {
+                        value: { owner_address: OWNER, to_address: CONTRACT, amount: 1 },
+                        type_url: 'type.googleapis.com/protocol.TransferContract',
+                    },
+                    type: 'TransferContract',
+                });
+                assert.isFalse(txCheckWithArgs(tx, withdrawArgs, {}));
+                assert.isFalse(txCheckWithArgs(tx, withdrawArgs, {}, ContractType.WithdrawBalanceContract));
+            });
+
+            it('rejects a transaction whose contract field is not an array', function () {
+                const tx = selfConsistent('WithdrawBalanceContract', withdrawArgs);
+                tx.raw_data.contract = tx.raw_data.contract[0];
+                assert.isFalse(txCheckWithArgs(tx, withdrawArgs, {}));
+            });
+
+            it('returns false instead of throwing for a transaction without raw_data', function () {
+                assert.isFalse(txCheckWithArgs({ txID: 'ab', raw_data_hex: 'ab' }, withdrawArgs, {}));
+                assert.isFalse(txCheckWithArgs(undefined, withdrawArgs, {}));
+                assert.isFalse(txCheckWithArgs(null, withdrawArgs, {}));
+            });
+        });
+    });
+});

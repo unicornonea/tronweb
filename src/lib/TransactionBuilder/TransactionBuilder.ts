@@ -2475,15 +2475,28 @@ export class TransactionBuilder {
             if (typeof transaction.visible === 'boolean') {
                 res.transaction.transaction.visible = transaction.visible;
             }
+            const returned = res.transaction.transaction;
+            const localRawData = transaction.raw_data;
+            const checked = {
+                ...returned,
+                raw_data: {
+                    ...returned.raw_data,
+                    ref_block_bytes: localRawData.ref_block_bytes,
+                    ref_block_hash: localRawData.ref_block_hash,
+                    expiration: localRawData.expiration,
+                    timestamp: localRawData.timestamp,
+                },
+            };
             return resultManager(
-                res.transaction.transaction as unknown as TransactionWrapper,
+                checked as unknown as TransactionWrapper,
                 {
-                    ...transaction.raw_data.contract[0].parameter.value,
-                    Permission_id: transaction.raw_data.contract[0].Permission_id,
+                    ...localRawData.contract[0].parameter.value,
+                    Permission_id: localRawData.contract[0].Permission_id,
                 },
                 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
                 /* @ts-ignore */
-                { data: transaction.raw_data.data, fee_limit: transaction.raw_data.fee_limit }
+                { data: localRawData.data, fee_limit: localRawData.fee_limit },
+                localRawData.contract[0].type
             ) as unknown as U;
         } catch (e) {
             throw new Error('Error generating a new transaction id.');
