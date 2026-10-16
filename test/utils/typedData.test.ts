@@ -258,6 +258,43 @@ describe('TronWeb.utils.typedData', function () {
         });
     });
 
+    describe('#signTypedData private key handling', function () {
+        const key = 'e5a7d3c6b1f04c2d9e8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e';
+        const domain = { name: 'Key Test', version: '1', chainId: 1 };
+        const types = { Mail: [{ name: 'contents', type: 'string' }] };
+        const value = { contents: 'Hello, Bob!' };
+
+        it('accepts the key with or without 0x and in either hex case, with the same signature', function () {
+            const reference = utils.typedData.signTypedData(domain, types, value, key);
+            assert.equal(utils.typedData.signTypedData(domain, types, value, '0x' + key), reference);
+            assert.equal(utils.typedData.signTypedData(domain, types, value, key.toUpperCase()), reference);
+            assert.equal(utils.typedData.signTypedData(domain, types, value, '0x' + key.toUpperCase()), reference);
+        });
+
+        const malformed: Record<string, unknown> = {
+            'trailing newline': key + '\n',
+            '63 hex digits': key.slice(1),
+            '65 hex digits': key + 'f',
+            '0X prefix': '0X' + key,
+            'not a string': undefined,
+        };
+
+        for (const [name, pk] of Object.entries(malformed)) {
+            it(`rejects a key with a ${name} without echoing it`, function () {
+                let error: any;
+                try {
+                    utils.typedData.signTypedData(domain, types, value, pk as string);
+                } catch (err) {
+                    error = err;
+                }
+                assert.instanceOf(error, Error);
+                assert.equal(error.message, 'Invalid private key provided');
+                assert.isUndefined((error as any).value);
+                assert.notInclude(error.message, key.slice(1));
+            });
+        }
+    });
+
     describe('#verifyTypedData', function () {
         const privateKey = '0x' + '01'.repeat(32);
 
