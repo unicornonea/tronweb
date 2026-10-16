@@ -17,6 +17,7 @@ import {
     SigningKey,
 } from 'ethers';
 import type { BigNumberish, BytesLike, SignatureLike } from 'ethers';
+import { privateKeyToSigningHex } from './crypto.js';
 
 import { toHex } from './address.js';
 import { clonePlainData } from './clone.js';
@@ -735,8 +736,7 @@ export function signTypedData(
 ) {
     const messageDigest = hashTypedData(domain, types, value);
 
-    const key = `0x${privateKey.replace(/^0x/, '')}`;
-    const signingKey = new SigningKey(key);
+    const signingKey = new SigningKey(privateKeyToSigningHex(privateKey));
 
     const signature = signingKey.sign(messageDigest);
     const signatureHex = ['0x', signature.r.substring(2), signature.s.substring(2), Number(signature.v).toString(16)].join('');

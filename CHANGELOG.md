@@ -1,6 +1,14 @@
 Change Log
 =========
 
+__6.5.2__
+
+## Improvements
+
+- Message and typed-data signing no longer echo a malformed private key
+
+  `trx.sign(hexMessage, privateKey)`, `signMessageV2`, `signTypedData` / `_signTypedData`, `utils.message.signMessage` and `utils.typedData.signTypedData` used to hand the private key to ethers unchecked. A key that was not exactly 64 hex digits (a trailing newline from a `.env` file, a stripped leading zero, a `0X` prefix) made ethers throw an `INVALID_ARGUMENT` error that carried the full key in its message and `.value`, from where it reached logs and crash reporters. These entry points now validate the key first and throw a fixed `Invalid private key provided` that never includes the input. Accepted keys are unchanged: 64 hex digits in either case, with or without a lowercase `0x`, sign exactly as before. A missing default private key now fails with the same error instead of a `TypeError`.
+
 __6.5.1__
 
 ## Improvements
