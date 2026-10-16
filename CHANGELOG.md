@@ -17,6 +17,10 @@ __6.5.2__
 
   Genuine node answers are unaffected: `wallet/triggersmartcontract` always returns a `TriggerSmartContract`, and `wallet/getsignweight` re-serializes the submitted transaction (recomputing `txID` / `raw_data_hex`) and returns its contract type and block header as sent; `extendExpiration` sets the new expiration locally before calling it. `utils.transaction.txCheckWithArgs` gains an optional fourth `expectedType` argument. Its three-argument form behaves as before, except that a transaction whose `raw_data.contract` does not hold exactly one entry now returns `false`: previously a missing or empty contract list threw a `TypeError`, and contracts beyond the first were ignored.
 
+- `contract().at()` keeps the requested address
+
+  `Contract.at(address)` now verifies that the contract the node returns is the one that was asked for (compared in hex) and throws `Invalid contract address provided` otherwise; the instance address is the requested one, normalized to hex as before. `trx.getContract` keys its cache by the hex form for both reads and writes (as does the eviction in `clearABI`), so a base58 address now hits the cache on repeated calls instead of re-fetching, and an answer that describes no contract is no longer cached, so polling for a freshly deployed contract on the same instance now sees it once it lands.
+
 __6.5.1__
 
 ## Improvements
