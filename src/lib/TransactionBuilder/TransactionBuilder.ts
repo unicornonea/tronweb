@@ -1437,11 +1437,7 @@ export class TransactionBuilder {
 
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
-        if (this.tronWeb.trx.cache.contracts[contractAddress]) {
-            // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-            // @ts-ignore
-            delete this.tronWeb.trx.cache.contracts[contractAddress];
-        }
+        delete this.tronWeb.trx.cache.contracts[data.contract_address];
 
         const transactionOptions = getTransactionOptions(options);
         return createTransaction<ClearABIContract>(

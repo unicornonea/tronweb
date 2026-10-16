@@ -2451,6 +2451,62 @@ describe('TronWeb.trx', function () {
             const ret = await tronWeb.trx.getContract('417cbcc41052b59584d1ac9fc1ce39106533aa1d40');
             assert.deepEqual(ret, {});
         });
+
+        it('should serve repeated lookups from the cache whatever the address format', async function () {
+            const local = tronWebBuilder.createInstance();
+            const request = vi.spyOn(local.fullNode, 'request');
+            const hex = transaction.contract_address;
+            const b58 = TronWeb.address.fromHex(hex);
+
+            const first = await local.trx.getContract(b58);
+            const second = await local.trx.getContract(b58);
+            const third = await local.trx.getContract(hex);
+            const fourth = await local.trx.getContract(hex.toUpperCase());
+
+            assert.equal(request.mock.calls.filter(([url]) => url === 'wallet/getcontract').length, 1);
+            assert.equal(first.contract_address, hex);
+            assert.strictEqual(second, first);
+            assert.strictEqual(third, first);
+            assert.strictEqual(fourth, first);
+            request.mockRestore();
+        });
+
+        it('should not cache an answer that describes no contract', async function () {
+            const local = tronWebBuilder.createInstance();
+            const deploy = await local.transactionBuilder.createSmartContract(
+                { abi: testRevertContract.abi, bytecode: testRevertContract.bytecode },
+                accounts.hex[idx]
+            );
+            const hex = deploy.contract_address;
+            const b58 = TronWeb.address.fromHex(hex);
+
+            assert.deepEqual(await local.trx.getContract(b58), {});
+            assert.deepEqual(await local.trx.getContract(hex), {});
+
+            await broadcaster(null, accounts.pks[idx], deploy);
+            await waitChainData('contract', hex);
+
+            assert.equal((await local.trx.getContract(b58)).contract_address, hex);
+            const contract = await local.contract().at(b58);
+            assert.equal(contract.address, hex);
+        });
+
+        it('should evict the cached contract on clearABI whatever the address format', async function () {
+            const local = tronWebBuilder.createInstance();
+            const hex = transaction.contract_address;
+            const b58 = TronWeb.address.fromHex(hex);
+            const cache = (local.trx as any).cache.contracts as Record<string, unknown>;
+
+            await local.trx.getContract(b58);
+            assert.isDefined(cache[hex]);
+            await local.transactionBuilder.clearABI(b58, accounts.hex[idx]);
+            assert.isUndefined(cache[hex]);
+
+            await local.trx.getContract(hex.toUpperCase());
+            assert.isDefined(cache[hex]);
+            await local.transactionBuilder.clearABI(hex.toUpperCase(), accounts.hex[idx]);
+            assert.isUndefined(cache[hex]);
+        });
     });
 
     describe.concurrent('#getContractInfo', async function () {

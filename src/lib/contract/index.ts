@@ -203,7 +203,12 @@ export class Contract<Abi extends ContractAbiInterface = ContractAbiInterface> {
                 throw new Error('Unknown error: ' + JSON.stringify(contract, null, 2));
             }
 
-            this.address = contract.contract_address;
+            const requestedAddress = this.tronWeb.address.toHex(contractAddress);
+            if (this.tronWeb.address.toHex(contract.contract_address) !== requestedAddress) {
+                throw new Error('Invalid contract address provided');
+            }
+
+            this.address = requestedAddress;
             this.bytecode = contract.bytecode;
             this.deployed = true;
 
