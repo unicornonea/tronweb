@@ -996,7 +996,14 @@ const txCheck = (transaction) => {
     return compareTransaction(transaction, transactionPb);
 };
 
-const txCheckWithArgs = (transaction, args, options) => {
+const txCheckWithArgs = (transaction, args, options, expectedType?: string) => {
+    const contracts = transaction?.raw_data?.contract;
+    if (!Array.isArray(contracts) || contracts.length !== 1) {
+        return false;
+    }
+    if (typeof expectedType === 'string' && contracts[0]?.type !== expectedType) {
+        return false;
+    }
     const transactionPb = txJsonToPbWithArgs(transaction, args, options);
     return compareTransaction(transaction, transactionPb);
 };
