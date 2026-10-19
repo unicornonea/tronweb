@@ -25,6 +25,10 @@ __6.5.2__
 
   The numeric arguments that `TransactionBuilder` validates (amounts, balances, fee and energy limits, percentages, durations, counts, timestamps, brokerage, `voteScore` and `precision`) now accept only an integer `number`, a `bigint` or a plain digit string such as `'1000000'`. Previously the check coerced its input, so values that merely convert to an integer passed validation and were then encoded through a different conversion: an object with its own `valueOf` / `toString`, `'1e3'` (validated as 1000, encoded as 1), `'0x10'`, `''`, `true` or `[]`. Such inputs are now rejected with the method's usual `Invalid <name> provided` or `<name> must be a positive integer` error. `sendTrx`, `sendToken` and `sendAsset` apply the same check before converting the amount, so a fractional amount such as `1.5` or `'10.5'` is rejected instead of being truncated. Integer numbers, bigints and digit strings behave exactly as before. `utils.isInteger` is unchanged.
 
+- `TriggerSmartContract` transactions cannot carry both `data` and `function_selector` / `parameter`
+
+  When a `TriggerSmartContract` value held `data`, its `function_selector` and `parameter` were silently ignored: only `data` was serialized and signed. A transaction could therefore advertise one call in its JSON (for example `function_selector: 'transfer(address,uint256)'`) while `data` encoded another (an `approve`), and still pass `txCheck`, so a wallet or dApp that displayed `function_selector` showed the user something other than what they signed. Rebuilding such a transaction now throws `Invalid TriggerSmartContract: data cannot be combined with function_selector or parameter`, which surfaces from `trx.sign`, `multiSign`, `ecRecover`, `utils.transaction.txCheck` and `txCheckWithArgs`. Transactions with only `data`, or only `function_selector` / `parameter`, are unaffected, as are empty-string values; every transaction that TronWeb builds or receives from a node carries `data` alone.
+
 __6.5.1__
 
 ## Improvements
