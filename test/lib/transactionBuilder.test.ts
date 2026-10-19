@@ -4377,7 +4377,7 @@ describe('TronWeb.transactionBuilder', function () {
                 assert.equal(tx.raw_data.contract[0].parameter.value.frozen_balance, 1_000_000);
                 assert.isTrue(utils.transaction.txCheck(tx));
             }
-            const purchase = await tronWeb.transactionBuilder.purchaseToken(other(), '1000001', '5', owner());
+            const purchase = await tronWeb.transactionBuilder.purchaseToken(other(), '1000001', '5' as any, owner());
             assert.equal(purchase.raw_data.contract[0].parameter.value.amount, 5);
         });
 
@@ -4393,7 +4393,7 @@ describe('TronWeb.transactionBuilder', function () {
                 tronWeb.transactionBuilder.sendToken(other(), '1e3' as any, '1000001', owner()),
                 'Invalid amount provided'
             );
-            const tx = await tronWeb.transactionBuilder.sendTrx(other(), '10', owner());
+            const tx = await tronWeb.transactionBuilder.sendTrx(other(), '10' as any, owner());
             assert.equal(tx.raw_data.contract[0].parameter.value.amount, 10);
         });
 
@@ -4437,14 +4437,20 @@ describe('TronWeb.transactionBuilder', function () {
         });
 
         it('should keep applying the bounds to digit strings', async function () {
-            await assertThrow(tronWeb.transactionBuilder.freezeBalanceV2('0', 'BANDWIDTH', owner()), 'Invalid amount provided');
-            await assertThrow(tronWeb.transactionBuilder.freezeBalanceV2('-1', 'BANDWIDTH', owner()), 'Invalid amount provided');
             await assertThrow(
-                tronWeb.transactionBuilder.updateSetting(other(), '101', owner()),
+                tronWeb.transactionBuilder.freezeBalanceV2('0' as any, 'BANDWIDTH', owner()),
+                'Invalid amount provided'
+            );
+            await assertThrow(
+                tronWeb.transactionBuilder.freezeBalanceV2('-1' as any, 'BANDWIDTH', owner()),
+                'Invalid amount provided'
+            );
+            await assertThrow(
+                tronWeb.transactionBuilder.updateSetting(other(), '101' as any, owner()),
                 'Invalid userFeePercentage provided'
             );
-            const tx = await tronWeb.transactionBuilder.updateSetting(other(), '100', owner());
-            assert.equal(tx.raw_data.contract[0].parameter.value.consume_user_resource_percent, '100');
+            const tx = await tronWeb.transactionBuilder.updateSetting(other(), '100' as any, owner());
+            assert.equal(tx.raw_data.contract[0].parameter.value.consume_user_resource_percent, '100' as any);
         });
     });
 });
