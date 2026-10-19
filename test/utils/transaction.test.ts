@@ -1,4 +1,4 @@
-import { assert } from 'vitest';
+import { assert, vi } from 'vitest';
 import { TronWeb, utils } from '../setup/TronWeb.js';
 import { txJsonToPb, txPbToTxID, txPbToRawDataHex, txCheckWithArgs, txCheck } from '../../src/utils/transaction.js';
 import { ContractType } from '../../src/types/Contract.js';
@@ -170,6 +170,58 @@ describe('utils.transaction', function () {
                 assert.isFalse(txCheckWithArgs(null, withdrawArgs, {}));
             });
         });
+    });
+
+    describe('remote update of a TRC10 transfer (wallet/getsignweight)', function () {
+        // newTxID / extendExpiration / addUpdateData adopt the node's copy of the transaction.
+        // A TransferContract shares owner / to / amount with TransferAssetContract and ignores
+        // asset_name, so a node swapping the type passes the byte comparison and must be caught by type.
+        const assetValue = {
+            owner_address: OWNER,
+            to_address: CONTRACT,
+            amount: 1000,
+            asset_name: TronWeb.fromUtf8('1000001').replace(/^0x/, ''),
+        };
+        const tronWeb = new TronWeb({ fullHost: 'http://127.0.0.1:1' });
+
+        function original() {
+            return selfConsistent('TransferAssetContract', assetValue, { expiration: Date.now() + 60_000 });
+        }
+
+        // Answers wallet/getsignweight with the submitted transaction, optionally swapped to a TRX transfer.
+        function stubSignWeight(swap: boolean) {
+            return vi.spyOn(tronWeb.fullNode, 'request').mockImplementation(async (url: string, payload: any) => {
+                if (url !== 'wallet/getsignweight') throw new Error(`unexpected request ${url}`);
+                const { asset_name, ...trxValue } = payload.raw_data.contract[0].parameter.value;
+                const { contract, ...header } = payload.raw_data;
+                const tx = swap
+                    ? selfConsistent('TransferContract', trxValue, header)
+                    : selfConsistent('TransferAssetContract', { ...trxValue, asset_name }, header);
+                return { transaction: { transaction: tx } } as any;
+            });
+        }
+
+        afterEach(function () {
+            vi.restoreAllMocks();
+        });
+
+        it('accepts the genuine answer', async function () {
+            stubSignWeight(false);
+            const later = await tronWeb.transactionBuilder.newTxID(original());
+            assert.equal(later.raw_data.contract[0].type, 'TransferAssetContract');
+        });
+
+        const entries: [string, (tx: any) => Promise<unknown>][] = [
+            ['newTxID', (tx) => tronWeb.transactionBuilder.newTxID(tx)],
+            ['extendExpiration', (tx) => tronWeb.transactionBuilder.extendExpiration(tx, 3600)],
+            ['addUpdateData', (tx) => tronWeb.transactionBuilder.addUpdateData(tx, 'memo')],
+        ];
+        for (const [name, call] of entries) {
+            it(`${name} rejects a TransferContract returned for a TransferAssetContract`, async function () {
+                stubSignWeight(true);
+                await assertThrow(call(original()), 'Error generating a new transaction id.');
+            });
+        }
     });
 
     describe('TriggerSmartContract data / function_selector / parameter', function () {
