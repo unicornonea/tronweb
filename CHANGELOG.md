@@ -21,6 +21,10 @@ __6.5.2__
 
   `Contract.at(address)` now verifies that the contract the node returns is the one that was asked for (compared in hex) and throws `Invalid contract address provided` otherwise; the instance address is the requested one, normalized to hex as before. `trx.getContract` keys its cache by the hex form for both reads and writes (as does the eviction in `clearABI`), so a base58 address now hits the cache on repeated calls instead of re-fetching, and an answer that describes no contract is no longer cached, so polling for a freshly deployed contract on the same instance now sees it once it lands.
 
+- Numeric arguments must be integer values
+
+  The numeric arguments that `TransactionBuilder` validates (amounts, balances, fee and energy limits, percentages, durations, counts, timestamps, brokerage, `voteScore` and `precision`) now accept only an integer `number`, a `bigint` or a plain digit string such as `'1000000'`. Previously the check coerced its input, so values that merely convert to an integer passed validation and were then encoded through a different conversion: an object with its own `valueOf` / `toString`, `'1e3'` (validated as 1000, encoded as 1), `'0x10'`, `''`, `true` or `[]`. Such inputs are now rejected with the method's usual `Invalid <name> provided` or `<name> must be a positive integer` error. `sendTrx`, `sendToken` and `sendAsset` apply the same check before converting the amount, so a fractional amount such as `1.5` or `'10.5'` is rejected instead of being truncated. Integer numbers, bigints and digit strings behave exactly as before. `utils.isInteger` is unchanged.
+
 __6.5.1__
 
 ## Improvements

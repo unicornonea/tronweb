@@ -1,5 +1,5 @@
 import { isAddress, toHex } from '../utils/address.js';
-import { isNotNullOrUndefined, isInteger, isString, isObject, isValidURL, isHex, isBoolean } from '../utils/validations.js';
+import { isNotNullOrUndefined, isString, isObject, isValidURL, isHex, isBoolean } from '../utils/validations.js';
 
 export type ValidatorParamType = {
     value?: string | number | boolean | Record<string, unknown> | unknown[];
@@ -14,6 +14,23 @@ export type ValidatorParamType = {
     se?: number;
     optional?: boolean;
 };
+
+const INTEGER_STRING = /^-?\d+$/;
+
+function toIntegerValue(value: unknown): number | bigint | undefined {
+    switch (typeof value) {
+        case 'number':
+            return Number.isInteger(value) ? value : undefined;
+        case 'bigint':
+            return value;
+        case 'string': {
+            const number = INTEGER_STRING.test(value) ? Number(value) : NaN;
+            return Number.isFinite(number) ? number : undefined;
+        }
+        default:
+            return undefined;
+    }
+}
 
 export class Validator {
     invalid(param: ValidatorParamType) {
@@ -44,23 +61,27 @@ export class Validator {
                     }
                     break;
 
-                case 'integer':
+                case 'integer': {
+                    const integer = toIntegerValue(value);
                     if (
-                        !isInteger(value) ||
-                        (typeof gt === 'number' && value <= gt) ||
-                        (typeof lt === 'number' && value >= lt) ||
-                        (typeof gte === 'number' && value < gte) ||
-                        (typeof lte === 'number' && value > lte)
+                        integer === undefined ||
+                        (typeof gt === 'number' && integer <= gt) ||
+                        (typeof lt === 'number' && integer >= lt) ||
+                        (typeof gte === 'number' && integer < gte) ||
+                        (typeof lte === 'number' && integer > lte)
                     ) {
                         no = true;
                     }
                     break;
+                }
 
-                case 'positive-integer':
-                    if (!isInteger(value) || value <= 0) {
+                case 'positive-integer': {
+                    const integer = toIntegerValue(value);
+                    if (integer === undefined || integer <= 0) {
                         throw new Error(this.notPositive(param));
                     }
                     break;
+                }
 
                 case 'tokenId':
                     if (!isString(value) || !value.length) {

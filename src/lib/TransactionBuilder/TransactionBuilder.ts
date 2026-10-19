@@ -99,9 +99,6 @@ export class TransactionBuilder {
         from: string = this.tronWeb.defaultAddress.hex as string,
         options: TransactionCommonOptions = {}
     ): Promise<Transaction<TransferContract>> {
-        // accept amounts passed as strings
-        amount = parseInt(amount);
-
         this.validator.notValid([
             {
                 name: 'recipient',
@@ -126,6 +123,8 @@ export class TransactionBuilder {
             },
         ]);
 
+        amount = parseInt(amount);
+
         const data: TransferContract = {
             to_address: toHex(to),
             owner_address: toHex(from as string),
@@ -149,7 +148,6 @@ export class TransactionBuilder {
         from: string = this.tronWeb.defaultAddress.hex as string,
         options: TransactionCommonOptions = {}
     ): Promise<Transaction<TransferAssetContract>> {
-        amount = parseInt(amount);
         this.validator.notValid([
             {
                 name: 'recipient',
@@ -178,6 +176,8 @@ export class TransactionBuilder {
                 value: tokenId,
             },
         ]);
+
+        amount = parseInt(amount);
 
         const data: TransferAssetContract = {
             to_address: toHex(to),
@@ -1456,8 +1456,16 @@ export class TransactionBuilder {
     ): Promise<Transaction<UpdateBrokerageContract>> {
         if (!isNotNullOrUndefined(brokerage)) throw new Error('Invalid brokerage provided');
 
-        if (!isInteger(brokerage) || brokerage < 0 || brokerage > 100)
-            throw new Error('Brokerage must be an integer between 0 and 100');
+        this.validator.notValid([
+            {
+                name: 'brokerage',
+                type: 'integer',
+                value: brokerage,
+                gte: 0,
+                lte: 100,
+                msg: 'Brokerage must be an integer between 0 and 100',
+            },
+        ]);
 
         if (!TronWeb.isAddress(ownerAddress)) throw new Error('Invalid owner address provided');
 
@@ -1575,11 +1583,30 @@ export class TransactionBuilder {
             },
         ]);
 
-        if (isNotNullOrUndefined(voteScore) && (!isInteger(voteScore) || voteScore <= 0))
-            throw new Error('voteScore must be a positive integer greater than 0');
+        if (isNotNullOrUndefined(voteScore)) {
+            this.validator.notValid([
+                {
+                    name: 'voteScore',
+                    type: 'integer',
+                    value: voteScore,
+                    gt: 0,
+                    msg: 'voteScore must be a positive integer greater than 0',
+                },
+            ]);
+        }
 
-        if (isNotNullOrUndefined(precision) && (!isInteger(precision) || precision < 0 || precision > 6))
-            throw new Error('precision must be a positive integer >= 0 and <= 6');
+        if (isNotNullOrUndefined(precision)) {
+            this.validator.notValid([
+                {
+                    name: 'precision',
+                    type: 'integer',
+                    value: precision,
+                    gte: 0,
+                    lte: 6,
+                    msg: 'precision must be a positive integer >= 0 and <= 6',
+                },
+            ]);
+        }
 
         const data: Partial<AssetIssueContract> = {
             owner_address: toHex(issuerAddress),
