@@ -1,7 +1,8 @@
 import { assert } from 'vitest';
 import { TronWeb, utils } from '../setup/TronWeb.js';
-import { txJsonToPb, txPbToTxID, txPbToRawDataHex, txCheckWithArgs } from '../../src/utils/transaction.js';
+import { txJsonToPb, txPbToTxID, txPbToRawDataHex, txCheckWithArgs, txCheck } from '../../src/utils/transaction.js';
 import { ContractType } from '../../src/types/Contract.js';
+import assertThrow from '../helpers/assertThrow.js';
 
 const OWNER = '41e552f6487585c2b58bc2c9bb4492bc1f17132cd0';
 const CONTRACT = '41a614f803b6fd780986a42c78ec9c7f77e6ded13c';
@@ -58,7 +59,8 @@ describe('utils.transaction', function () {
                     { owner_address: OWNER, contract_address: CONTRACT, data: 'dead' },
                     { fee_limit: triggerArgs.fee_limit }
                 );
-                assert.isTrue(txCheckWithArgs(tx, { ...triggerArgs, data: 'dead' }, {}));
+                const { function_selector, parameter, ...rest } = triggerArgs;
+                assert.isTrue(txCheckWithArgs(tx, { ...rest, data: 'dead' }, {}));
             });
 
             it('rejects a transaction whose parameter value differs from the args', function () {
@@ -167,6 +169,87 @@ describe('utils.transaction', function () {
                 assert.isFalse(txCheckWithArgs(undefined, withdrawArgs, {}));
                 assert.isFalse(txCheckWithArgs(null, withdrawArgs, {}));
             });
+        });
+    });
+
+    describe('TriggerSmartContract data / function_selector / parameter', function () {
+        const SELECTOR = 'transfer(address,uint256)';
+        const PARAMETER = '0'.repeat(63) + '5';
+        // approve(address,uint256), which is what actually gets signed in the misleading case
+        const DATA = '095ea7b3' + '0'.repeat(63) + '5';
+        const ERROR = 'Invalid TriggerSmartContract: data cannot be combined with function_selector or parameter';
+
+        function triggerTx(owner: string, value: Record<string, unknown>) {
+            return selfConsistent(
+                'TriggerSmartContract',
+                { owner_address: owner, contract_address: CONTRACT, ...value },
+                { fee_limit: 100_000_000 }
+            );
+        }
+
+        // A transaction signed over DATA whose JSON also advertises another call.
+        function misleading(owner: string, extra: Record<string, unknown>) {
+            const tx = triggerTx(owner, { data: DATA });
+            Object.assign(tx.raw_data.contract[0].parameter.value, extra);
+            return tx;
+        }
+
+        it('accepts data alone', function () {
+            assert.isTrue(txCheck(triggerTx(OWNER, { data: DATA })));
+        });
+
+        it('accepts function_selector and parameter without data, encoding them as before', function () {
+            const tx = triggerTx(OWNER, { function_selector: SELECTOR, parameter: PARAMETER });
+            assert.isTrue(txCheck(tx));
+            const expected = triggerTx(OWNER, {
+                data: utils.ethersUtils.keccak256(utils.ethersUtils.toUtf8Bytes(SELECTOR)).substring(2, 10) + PARAMETER,
+            });
+            assert.strictEqual(tx.raw_data_hex, expected.raw_data_hex);
+        });
+
+        it('ignores empty function_selector / parameter next to data', function () {
+            assert.isTrue(txCheck(misleading(OWNER, { function_selector: '', parameter: '' })));
+        });
+
+        it('rejects data combined with function_selector', function () {
+            const tx = misleading(OWNER, { function_selector: SELECTOR, parameter: PARAMETER });
+            assert.throws(() => txCheck(tx), ERROR);
+        });
+
+        it('rejects data combined with function_selector alone', function () {
+            assert.throws(() => txCheck(misleading(OWNER, { function_selector: SELECTOR })), ERROR);
+        });
+
+        it('rejects data combined with parameter alone', function () {
+            assert.throws(() => txCheck(misleading(OWNER, { parameter: PARAMETER })), ERROR);
+        });
+
+        it('rejects the combination when rebuilding from args', function () {
+            const tx = triggerTx(OWNER, { data: DATA });
+            const args = {
+                owner_address: OWNER,
+                contract_address: CONTRACT,
+                data: DATA,
+                function_selector: SELECTOR,
+                fee_limit: 100_000_000,
+            };
+            assert.throws(() => txCheckWithArgs(tx, args, {}, 'TriggerSmartContract'), ERROR);
+        });
+
+        it('refuses to sign or recover such a transaction', async function () {
+            const tronWeb = new TronWeb({ fullHost: 'http://127.0.0.1:1' });
+            const account = await tronWeb.utils.accounts.generateAccount();
+            const owner = account.address.hex.toLowerCase();
+
+            const genuine = triggerTx(owner, { data: DATA });
+            const signed = await tronWeb.trx.sign(genuine, account.privateKey);
+            assert.strictEqual(tronWeb.trx.ecRecover(signed), account.address.base58);
+
+            const tx = misleading(owner, { function_selector: SELECTOR, parameter: PARAMETER });
+            await assertThrow(tronWeb.trx.sign(tx, account.privateKey), ERROR);
+
+            const tampered = { ...signed, raw_data: tx.raw_data };
+            assert.throws(() => tronWeb.trx.ecRecover(tampered), ERROR);
         });
     });
 });
