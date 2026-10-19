@@ -25,6 +25,10 @@ __6.5.2__
 
   The numeric arguments that `TransactionBuilder` validates (amounts, balances, fee and energy limits, percentages, durations, counts, timestamps, brokerage, `voteScore` and `precision`) now accept only an integer `number`, a `bigint` or a plain digit string such as `'1000000'`. Previously the check coerced its input, so values that merely convert to an integer passed validation and were then encoded through a different conversion: an object with its own `valueOf` / `toString`, `'1e3'` (validated as 1000, encoded as 1), `'0x10'`, `''`, `true` or `[]`. Such inputs are now rejected with the method's usual `Invalid <name> provided` or `<name> must be a positive integer` error. `sendTrx`, `sendToken` and `sendAsset` apply the same check before converting the amount, so a fractional amount such as `1.5` or `'10.5'` is rejected instead of being truncated. Integer numbers, bigints and digit strings behave exactly as before. `utils.isInteger` is unchanged.
 
+- Contract sends require an explicit broadcast acknowledgement
+
+  `contract.write`, `contract.method().send()` and `contract().new()` now treat a broadcast as successful only when the node answers `result: true`. Previously anything without a `code` (or, on the `write` path, without `result: false`) counted as sent, so an empty or non-JSON body from a proxy, a `{ "Error": ... }` exception body from the node, or `{ "result": 0 }` returned a txID for a transaction that never reached the network. Such answers now throw with the node's `message`, `code` or `Error` text, or `Failed to broadcast transaction`. The error shapes are unchanged (`Error` with `.error` on `send()`, a plain `{ error, message }` object on `new()`), and `trx.sendRawTransaction` still returns the node's answer as is.
+
 __6.5.1__
 
 ## Improvements

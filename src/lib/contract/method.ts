@@ -3,6 +3,7 @@ import utils from '../../utils/index.js';
 import { encodeParamsV2ByABI, decodeParamsV2ByABI } from '../../utils/abi.js';
 import { TronWeb } from '../../tronweb.js';
 import { Contract } from './index.js';
+import { isBroadcastAccepted, getBroadcastErrorMessage } from './readWrite.js';
 import { sha3 } from '../../utils/crypto.js';
 
 export interface CallOptions {
@@ -300,14 +301,10 @@ export class Method<AbiFrag extends Readonly<AbiFragmentNoErrConstructor>> {
 
         const broadcast = await this.tronWeb.trx.sendRawTransaction(signedTransaction);
 
-        if (broadcast.code) {
-            const err = {
-                error: broadcast.code,
-                message: broadcast.code as unknown as string,
-            };
-            if (broadcast.message) err.message = this.tronWeb.toUtf8(broadcast.message);
-            const error = new Error(err.message);
-            (error as any).error = broadcast.code;
+        if (!isBroadcastAccepted(broadcast)) {
+            const message = getBroadcastErrorMessage(this.tronWeb, broadcast);
+            const error = new Error(message);
+            (error as any).error = broadcast?.code || message;
             throw error;
         }
 
