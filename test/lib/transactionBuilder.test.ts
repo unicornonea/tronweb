@@ -1016,6 +1016,56 @@ describe('TronWeb.transactionBuilder', function () {
             assert.isTrue(res.receipt.result);
         });
 
+        it('should broadcast a proposal whose parameters are not in serialization order', async function () {
+            const transaction = await tronWeb.transactionBuilder.createProposal([parameters[1], parameters[0]], ADDRESS_BASE58);
+            const res = await broadcaster(transaction);
+            assert.isTrue(res.receipt.result);
+        });
+
+        it('should list the parameters in the order they are serialized, whatever the input order', async function () {
+            const blockHeader = { ref_block_bytes: '0000', ref_block_hash: '0000000000000000', expiration: 1, timestamp: 1 };
+            const cases: [number[], number[]][] = [
+                [[70, 52], [52, 70]],
+                [[52, 70], [52, 70]],
+                // jspb orders map keys as strings, not as numbers
+                [[9, 20, 1000, 1001], [1000, 1001, 20, 9]],
+                [[1000, 1001, 20, 9], [1000, 1001, 20, 9]],
+            ];
+            const rawDataHexes: string[] = [];
+            for (const [keys, expected] of cases) {
+                const input = keys.map((key) => ({ key, value: key + 1 }));
+                const transaction = await tronWeb.transactionBuilder.createProposal(input, ADDRESS_BASE58, { blockHeader });
+                const parameter = txPars(transaction) as ContractParamterWrapper<ProposalCreateContract>;
+
+                assert.deepEqual(
+                    parameter.value.parameters,
+                    expected.map((key) => ({ key, value: key + 1 }))
+                );
+                assert.deepEqual(
+                    input.map(({ key }) => key),
+                    keys,
+                    'does not reorder the caller array'
+                );
+                rawDataHexes.push(transaction.raw_data_hex);
+            }
+            // The input order does not change the transaction
+            assert.equal(rawDataHexes[0], rawDataHexes[1]);
+            assert.equal(rawDataHexes[2], rawDataHexes[3]);
+        });
+
+        it('should throw on a duplicate parameter key', async function () {
+            await assertThrow(
+                tronWeb.transactionBuilder.createProposal(
+                    [
+                        { key: 52, value: 1 },
+                        { key: 52, value: 2 },
+                    ],
+                    ADDRESS_BASE58
+                ),
+                'Duplicate proposal parameter key 52'
+            );
+        });
+
         it('should throw if issuer address is invalid', async function () {
             await assertThrow(
                 tronWeb.transactionBuilder.createProposal(parameters, 'sadasdsffdgdf'),

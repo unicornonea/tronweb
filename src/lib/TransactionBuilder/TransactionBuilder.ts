@@ -1878,10 +1878,22 @@ export class TransactionBuilder {
         const invalid = 'Invalid proposal parameters provided';
         if (!parameters) throw new Error(invalid);
 
-        const newParams = isArray(parameters) ? parameters : [parameters];
+        const newParams = isArray(parameters) ? [...parameters] : [parameters];
+        const keys = new Set<string>();
         for (const parameter of newParams) {
             if (!isObject(parameter)) throw new Error(invalid);
+            const key = String(parameter.key);
+            if (keys.has(key)) throw new Error(`Duplicate proposal parameter key ${key}`);
+            keys.add(key);
         }
+        // `parameters` is a protobuf map: jspb serializes its entries sorted by the key as a string
+        // (e.g. 1000, 20, 9), while the node hashes them in the order the JSON lists them. List them
+        // in the jspb order so both compute the same txID.
+        newParams.sort((a, b) => {
+            const ka = String(a.key);
+            const kb = String(b.key);
+            return ka < kb ? -1 : ka > kb ? 1 : 0;
+        });
 
         const data: ProposalCreateContract = {
             owner_address: toHex(issuerAddress as string),
