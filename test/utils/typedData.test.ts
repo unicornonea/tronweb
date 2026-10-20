@@ -256,6 +256,37 @@ describe('TronWeb.utils.typedData', function () {
             circular.Mail.push(circular);
             assert.throws(() => sign(domain, circular, value), 'Invalid typed data: circular reference at types.Mail[1]');
         });
+
+        it('rejects a struct type named like a base type, instead of signing it as that base type', function () {
+            for (const name of [
+                'bool',
+                'address',
+                'string',
+                'bytes',
+                'bytes32',
+                'uint256',
+                'int',
+                'trcToken',
+                'uint7',
+                'bytes0',
+            ]) {
+                const shadowing = { [name]: [{ name: 'amount', type: 'uint256' }] };
+                assert.throws(
+                    () => sign(domain, shadowing, { amount: 1 }),
+                    `struct type name ${JSON.stringify(name)} collides with a base type`
+                );
+                assert.throws(
+                    () => utils._TypedDataEncoder.from(shadowing),
+                    `struct type name ${JSON.stringify(name)} collides with a base type`
+                );
+            }
+
+            const child = { Mail: [{ name: 'flag', type: 'bool' }], bool: [{ name: 'amount', type: 'uint256' }] };
+            assert.throws(
+                () => sign(domain, child, { flag: { amount: 1 } }),
+                'struct type name "bool" collides with a base type'
+            );
+        });
     });
 
     describe('#signTypedData private key handling', function () {
@@ -353,6 +384,14 @@ describe('TronWeb.utils.typedData', function () {
             assert.throws(
                 () => utils.typedData.verifyTypedData({ ...domain, chainId: () => 1 } as any, types, value, signature),
                 'Invalid typed data: unsupported function at domain.chainId'
+            );
+        });
+
+        it('rejects a struct type named like a base type', function () {
+            const shadowing = { bool: [{ name: 'amount', type: 'uint256' }] };
+            assert.throws(
+                () => utils.typedData.verifyTypedData(domain, shadowing, { amount: 2 }, signature),
+                'struct type name "bool" collides with a base type'
             );
         });
     });

@@ -207,6 +207,16 @@ function getBaseEncoder(type: string): null | ((value: any) => string) {
     return null;
 }
 
+// Whether %%name%% is in the base type namespace (address, bool, uintXX, bytesXX,
+// ...). Names that look like a base type but are malformed (e.g. uint7) count too.
+function isBaseTypeName(name: string): boolean {
+    try {
+        return getBaseEncoder(name) != null;
+    } catch (error) {
+        return true;
+    }
+}
+
 function encodeType(name: string, fields: Array<TypedDataField>): string {
     return `${name}(${fields.map(({ name, type }) => type + ' ' + name).join(',')})`;
 }
@@ -271,6 +281,15 @@ export class TypedDataEncoder {
         });
 
         for (const name in types) {
+            // A struct named like a base type would be encoded as that base type,
+            // silently dropping its fields from the hash
+            assertArgument(
+                !isBaseTypeName(name),
+                `struct type name ${JSON.stringify(name)} collides with a base type`,
+                'types',
+                types
+            );
+
             const uniqueNames: Set<string> = new Set();
 
             for (const field of types[name]) {
