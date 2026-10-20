@@ -29,6 +29,10 @@ __6.5.2__
 
   When a `TriggerSmartContract` value held `data`, its `function_selector` and `parameter` were silently ignored: only `data` was serialized and signed. A transaction could therefore advertise one call in its JSON (for example `function_selector: 'transfer(address,uint256)'`) while `data` encoded another (an `approve`), and still pass `txCheck`, so a wallet or dApp that displayed `function_selector` showed the user something other than what they signed. Rebuilding such a transaction now throws `Invalid TriggerSmartContract: data cannot be combined with function_selector or parameter`, which surfaces from `trx.sign`, `multiSign`, `ecRecover`, `utils.transaction.txCheck` and `txCheckWithArgs`. Transactions with only `data`, or only `function_selector` / `parameter`, are unaffected, as are empty-string values; every transaction that TronWeb builds or receives from a node carries `data` alone.
 
+- Contract sends require an explicit broadcast acknowledgement
+
+  `contract.write`, `contract.method().send()` and `contract().new()` now treat a broadcast as successful only when the node answers `result: true`. Previously anything without a `code` (or, on the `write` path, without `result: false`) counted as sent, so an empty or non-JSON body from a proxy, a `{ "Error": ... }` exception body from the node, or `{ "result": 0 }` returned a txID for a transaction that never reached the network. Such answers now throw with the node's `message`, `code` or `Error` text, or `Failed to broadcast transaction`. The error shapes are unchanged (`Error` with `.error` on `send()`, a plain `{ error, message }` object on `new()`), and `trx.sendRawTransaction` still returns the node's answer as is.
+
 __6.5.1__
 
 ## Improvements
