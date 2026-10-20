@@ -1,7 +1,7 @@
 import { TronWeb } from '../../tronweb.js';
 import utils from '../../utils/index.js';
 import { Method, AbiFragmentNoErrConstructor } from './method.js';
-import { buildReadNamespace, buildWriteNamespace } from './readWrite.js';
+import { buildReadNamespace, buildWriteNamespace, isBroadcastAccepted, getBroadcastErrorMessage } from './readWrite.js';
 import { clonePlainData } from '../../utils/clone.js';
 import type { ContractReadNamespace, ContractWriteNamespace } from '../../types/Contract.js';
 import type { ContractAbiInterface, GetMethodsTypeFromAbi, GetOnMethodTypeFromAbi, AnyOnMethodType } from '../../types/ABI.js';
@@ -183,10 +183,11 @@ export class Contract<Abi extends ContractAbiInterface = ContractAbiInterface> {
         const signedTransaction = await this.tronWeb.trx.sign(transaction, privateKey);
         const contract = await this.tronWeb.trx.sendRawTransaction(signedTransaction);
 
-        if (contract.code) {
+        if (!isBroadcastAccepted(contract)) {
+            const message = getBroadcastErrorMessage(this.tronWeb, contract);
             throw {
-                error: contract.code,
-                message: this.tronWeb.toUtf8(contract.message),
+                error: contract?.code || message,
+                message,
             };
         }
 
