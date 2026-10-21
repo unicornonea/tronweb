@@ -1,10 +1,8 @@
 import {
     keccak256,
     recoverAddress,
-    concat,
     defineProperties,
     getBigInt,
-    getBytes,
     hexlify,
     isHexString,
     mask,
@@ -13,10 +11,10 @@ import {
     toTwos,
     zeroPadValue,
     assertArgument,
-    id,
     SigningKey,
 } from 'ethers';
 import type { BigNumberish, BytesLike, SignatureLike } from 'ethers';
+import { concat, getBytes, id } from './bytesUtils.js';
 import { privateKeyToSigningHex } from './crypto.js';
 
 import { toHex } from './address.js';
