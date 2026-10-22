@@ -111,5 +111,8 @@
     },
     "homepage": "https://tronweb.network",
     "license": "MIT",
-    "repository": "https://github.com/tronprotocol/tronweb.git"
+    "repository": "https://github.com/tronprotocol/tronweb.git",
+    "engines": {
+        "node": "^22.23.4 || ^24.22.1 || >=26.12.1"
+    }
 }
