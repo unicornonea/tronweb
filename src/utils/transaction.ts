@@ -388,12 +388,10 @@ const buildVoteWitnessAccount = (value, options) => {
 const buildCreateSmartContract = (value, options) => {
     const params = value?.new_contract
         ? {
-              ...{
-                  owner_address: value.owner_address,
-                  call_token_value: value.call_token_value,
-                  token_id: value.token_id,
-              },
               ...value.new_contract,
+              owner_address: value.owner_address,
+              call_token_value: value.call_token_value,
+              token_id: value.token_id,
           }
         : value;
     const {

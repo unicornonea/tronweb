@@ -304,4 +304,56 @@ describe('utils.transaction', function () {
             assert.throws(() => tronWeb.trx.ecRecover(tampered), ERROR);
         });
     });
+
+    describe('CreateSmartContract outer fields nested in new_contract', function () {
+        const OTHER_OWNER = '41a614f803b6fd780986a42c78ec9c7f77e6ded13c';
+        const NEW_CONTRACT = {
+            origin_address: OWNER,
+            abi: {},
+            bytecode: '6080',
+            consume_user_resource_percent: 100,
+            origin_energy_limit: 10_000_000,
+        };
+
+        function createTx(owner: string, value: Record<string, unknown> = {}) {
+            return selfConsistent(
+                'CreateSmartContract',
+                { owner_address: owner, new_contract: { ...NEW_CONTRACT }, ...value },
+                { fee_limit: 100_000_000 }
+            );
+        }
+
+        // Signed bytes carry the token transfer, the JSON only shows it inside new_contract.
+        function misleading(owner: string) {
+            const tx = createTx(owner, { call_token_value: 5_000_000, token_id: '1000001' });
+            const value = tx.raw_data.contract[0].parameter.value;
+            value.new_contract = { ...value.new_contract, call_token_value: 5_000_000, token_id: '1000001' };
+            delete value.call_token_value;
+            delete value.token_id;
+            return tx;
+        }
+
+        it('builds owner_address / call_token_value / token_id from the top level only', function () {
+            const plain = createTx(OWNER);
+            const tx = createTx(OWNER);
+            tx.raw_data.contract[0].parameter.value.new_contract = {
+                ...NEW_CONTRACT,
+                owner_address: OTHER_OWNER,
+                call_token_value: 5_000_000,
+                token_id: '1000001',
+            };
+            assert.strictEqual(txPbToRawDataHex(txJsonToPb(tx)).toLowerCase(), plain.raw_data_hex);
+        });
+
+        it('rejects a transaction whose signed token values only appear in new_contract', function () {
+            assert.isFalse(txCheck(misleading(OWNER)));
+        });
+
+        it('refuses to sign such a transaction', async function () {
+            const tronWeb = new TronWeb({ fullHost: 'http://127.0.0.1:1' });
+            const account = await tronWeb.utils.accounts.generateAccount();
+            const owner = account.address.hex.toLowerCase();
+            await assertThrow(tronWeb.trx.sign(misleading(owner), account.privateKey), 'Invalid transaction');
+        });
+    });
 });
