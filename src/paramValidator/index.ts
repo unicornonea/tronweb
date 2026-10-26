@@ -1,5 +1,6 @@
+import { BigNumber } from 'bignumber.js';
 import { isAddress, toHex } from '../utils/address.js';
-import { isNotNullOrUndefined, isString, isObject, isValidURL, isHex, isBoolean } from '../utils/validations.js';
+import { isNotNullOrUndefined, isString, isObject, isValidURL, isHex, isBoolean, isBigNumber } from '../utils/validations.js';
 
 export type ValidatorParamType = {
     value?: string | number | boolean | Record<string, unknown> | unknown[];
@@ -26,6 +27,13 @@ function toIntegerValue(value: unknown): number | bigint | undefined {
         case 'string': {
             const number = INTEGER_STRING.test(value) ? Number(value) : NaN;
             return Number.isFinite(number) ? number : undefined;
+        }
+        case 'object': {
+            // Copy first so the value is read once and the checks run on prototype methods
+            // rather than anything the instance overrides.
+            if (!isBigNumber(value)) return undefined;
+            const copy = new BigNumber(value);
+            return copy.isInteger() ? BigInt(copy.toFixed()) : undefined;
         }
         default:
             return undefined;

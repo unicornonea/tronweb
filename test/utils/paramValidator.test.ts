@@ -1,4 +1,5 @@
 import { assert } from 'vitest';
+import { BigNumber } from 'bignumber.js';
 import { Validator } from '../../src/paramValidator/index.js';
 
 const validator = new Validator();
@@ -40,6 +41,34 @@ describe('paramValidator', function () {
         it('accepts bigints', function () {
             assert.isFalse(integer(1n));
             assert.isFalse(integer(5_000_000_000n));
+        });
+
+        it('accepts integer BigNumbers', function () {
+            assert.isFalse(integer(new BigNumber(0)));
+            assert.isFalse(integer(new BigNumber(-3)));
+            assert.isFalse(integer(new BigNumber('9000000000000000000')));
+            assert.isFalse(integer(new BigNumber('1e30')));
+            assert.isFalse(integer(new BigNumber('12.0')));
+        });
+
+        it('rejects non-integer BigNumbers', function () {
+            assert.isTrue(integer(new BigNumber(1.5)));
+            assert.isTrue(integer(new BigNumber(NaN)));
+            assert.isTrue(integer(new BigNumber(Infinity)));
+            assert.isTrue(integer(new BigNumber(-Infinity)));
+        });
+
+        it('applies the bounds to BigNumbers exactly', function () {
+            assert.isTrue(integer(new BigNumber(0), { gt: 0 }));
+            assert.isFalse(integer(new BigNumber(1), { gt: 0 }));
+            assert.isTrue(integer(new BigNumber(-1), { gte: 0 }));
+            assert.isTrue(integer(new BigNumber(101), { lte: 100 }));
+            assert.isFalse(integer(new BigNumber(100), { lte: 100 }));
+            assert.isTrue(integer(new BigNumber('9007199254740993'), { lte: 9007199254740992 }));
+        });
+
+        it('rejects objects that only look like a BigNumber', function () {
+            assert.isTrue(integer({ constructor: { name: 'BigNumber' }, isInteger: () => true, toFixed: () => '1' }));
         });
 
         it('applies the bounds to accepted values of every kind', function () {
@@ -125,10 +154,14 @@ describe('paramValidator', function () {
             assert.isFalse(positive(1)());
             assert.isFalse(positive('1')());
             assert.isFalse(positive(1n)());
+            assert.isFalse(positive(new BigNumber(1))());
         });
 
         it('throws for zero, negatives and anything that is not an integer value', function () {
             for (const value of [0, -1, '0', '-1', 0n, 1.5, '', '1e3', '0x10', true, [], {}, null, undefined]) {
+                assert.throws(positive(value), 'balance must be a positive integer');
+            }
+            for (const value of [new BigNumber(0), new BigNumber(-1), new BigNumber(0.5), new BigNumber(NaN)]) {
                 assert.throws(positive(value), 'balance must be a positive integer');
             }
             assert.throws(positive({ valueOf: () => 1, toString: () => '5000000000' }), 'balance must be a positive integer');
