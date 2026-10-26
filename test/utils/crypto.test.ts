@@ -8,7 +8,10 @@ const { ADDRESS_HEX, ADDRESS_BASE58 } = config;
 
 // Private key 0x...01 controls ADDRESS_HEX / ADDRESS_BASE58.
 const PRIVATE_KEY = '0'.repeat(63) + '1';
-const PRIVATE_KEY_BASE64 = Buffer.from(PRIVATE_KEY, 'hex').toString('base64');
+// btoa-based reference encoders (not Node's Buffer) so this suite also runs in the browser.
+const bytesToBase64 = (bytes: ArrayLike<number>) => btoa(String.fromCharCode(...Array.from(bytes)));
+const hexToBase64 = (hex: string) => bytesToBase64(hex.match(/../g)!.map((b) => parseInt(b, 16)));
+const PRIVATE_KEY_BASE64 = hexToBase64(PRIVATE_KEY);
 
 describe('utils.crypto', function () {
     describe('#privateKeyToSigningHex()', function () {
@@ -85,7 +88,7 @@ describe('utils.crypto', function () {
 
     describe('#arrayToBase64String()', function () {
         it('should base64-encode a byte array', function () {
-            assert.equal(crypto.arrayToBase64String([1, 2, 3, 255]), Buffer.from([1, 2, 3, 255]).toString('base64'));
+            assert.equal(crypto.arrayToBase64String([1, 2, 3, 255]), bytesToBase64([1, 2, 3, 255]));
         });
     });
 
@@ -108,7 +111,7 @@ describe('utils.crypto', function () {
                     timestamp: 1_700_000_000_000,
                 },
             } as any);
-            const base64 = Buffer.from(pb.serializeBinary()).toString('base64');
+            const base64 = bytesToBase64(pb.serializeBinary());
             const raw = crypto.getRowBytesFromTransactionBase64(base64);
             assert.deepEqual(Array.from(raw), Array.from(pb.getRawData().serializeBinary()));
         });
@@ -118,10 +121,7 @@ describe('utils.crypto', function () {
         it('should derive the address in base58, hex and base64 form', function () {
             assert.equal(crypto.getBase58CheckAddressFromPriKeyBase64String(PRIVATE_KEY_BASE64), ADDRESS_BASE58);
             assert.equal(crypto.getHexStrAddressFromPriKeyBase64String(PRIVATE_KEY_BASE64).toLowerCase(), ADDRESS_HEX);
-            assert.equal(
-                crypto.getAddressFromPriKeyBase64String(PRIVATE_KEY_BASE64),
-                Buffer.from(ADDRESS_HEX, 'hex').toString('base64')
-            );
+            assert.equal(crypto.getAddressFromPriKeyBase64String(PRIVATE_KEY_BASE64), hexToBase64(ADDRESS_HEX));
             assert.equal(crypto.passwordToAddress(PRIVATE_KEY_BASE64), ADDRESS_BASE58);
         });
     });
