@@ -279,8 +279,7 @@ export class TypedDataEncoder {
         });
 
         for (const name in types) {
-            // A struct named like a base type would be encoded as that base type,
-            // silently dropping its fields from the hash
+            // Struct names must not overlap with the base type namespace
             assertArgument(
                 !isBaseTypeName(name),
                 `struct type name ${JSON.stringify(name)} collides with a base type`,

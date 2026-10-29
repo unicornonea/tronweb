@@ -164,8 +164,7 @@ const buildTriggerSmartContract = (value, options) => {
     triggerSmartContract.setOwnerAddress(fromHexString(owner_address));
     triggerSmartContract.setContractAddress(fromHexString(contract_address));
     triggerSmartContract.setCallValue(call_value);
-    // data is what gets signed; a function_selector / parameter next to it would be ignored
-    // and could misrepresent the call to anyone reading the JSON.
+    // data and function_selector / parameter are alternative encodings of the call; accept only one.
     if (data && (function_selector || parameter)) {
         throw new Error('Invalid TriggerSmartContract: data cannot be combined with function_selector or parameter');
     }

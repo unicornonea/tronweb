@@ -276,7 +276,7 @@ describe('#contract.index', function () {
             assert.isFunction((deployed as any).set);
         });
 
-        it('should still send through a genuine node', async function () {
+        it('should still send when the node acknowledges the broadcast', async function () {
             const txid = await write();
             assert.match(txid, /^[0-9a-f]{64}$/);
             const sent = await send();

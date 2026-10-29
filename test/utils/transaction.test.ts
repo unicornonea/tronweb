@@ -13,8 +13,7 @@ const HEADER = {
     timestamp: 1_700_000_000_000,
 };
 
-// A transaction whose txID / raw_data_hex are derived from its own JSON, exactly as a
-// (possibly malicious) node would return it: self-consistent, whatever the contract type.
+// A transaction whose txID / raw_data_hex are derived from its own JSON.
 function selfConsistent(type: string, value: Record<string, unknown>, extra: Record<string, unknown> = {}) {
     const tx: any = {
         visible: false,
@@ -68,7 +67,7 @@ describe('utils.transaction', function () {
                 assert.isFalse(txCheckWithArgs(tx, { owner_address: CONTRACT }, {}));
             });
 
-            it('rejects a transaction whose raw_data_hex was tampered with', function () {
+            it('rejects a transaction whose raw_data_hex was modified', function () {
                 const tx = selfConsistent('WithdrawBalanceContract', withdrawArgs);
                 tx.raw_data_hex = tx.raw_data_hex.replace(/.$/, (c: string) => (c === '0' ? '1' : '0'));
                 assert.isFalse(txCheckWithArgs(tx, withdrawArgs, {}));
@@ -173,9 +172,7 @@ describe('utils.transaction', function () {
     });
 
     describe('remote update of a TRC10 transfer (wallet/getsignweight)', function () {
-        // newTxID / extendExpiration / addUpdateData adopt the node's copy of the transaction.
-        // A TransferContract shares owner / to / amount with TransferAssetContract and ignores
-        // asset_name, so a node swapping the type passes the byte comparison and must be caught by type.
+        // newTxID / extendExpiration / addUpdateData check the contract type of the node's copy.
         const assetValue = {
             owner_address: OWNER,
             to_address: CONTRACT,
@@ -188,13 +185,13 @@ describe('utils.transaction', function () {
             return selfConsistent('TransferAssetContract', assetValue, { expiration: Date.now() + 60_000 });
         }
 
-        // Answers wallet/getsignweight with the submitted transaction, optionally swapped to a TRX transfer.
-        function stubSignWeight(swap: boolean) {
+        // Answers wallet/getsignweight with the submitted transaction, optionally as a TransferContract.
+        function stubSignWeight(asTrx: boolean) {
             return vi.spyOn(tronWeb.fullNode, 'request').mockImplementation(async (url: string, payload: any) => {
                 if (url !== 'wallet/getsignweight') throw new Error(`unexpected request ${url}`);
                 const { asset_name, ...trxValue } = payload.raw_data.contract[0].parameter.value;
                 const { contract, ...header } = payload.raw_data;
-                const tx = swap
+                const tx = asTrx
                     ? selfConsistent('TransferContract', trxValue, header)
                     : selfConsistent('TransferAssetContract', { ...trxValue, asset_name }, header);
                 return { transaction: { transaction: tx } } as any;
@@ -205,7 +202,7 @@ describe('utils.transaction', function () {
             vi.restoreAllMocks();
         });
 
-        it('accepts the genuine answer', async function () {
+        it('accepts a matching answer', async function () {
             stubSignWeight(false);
             const later = await tronWeb.transactionBuilder.newTxID(original());
             assert.equal(later.raw_data.contract[0].type, 'TransferAssetContract');
@@ -227,7 +224,6 @@ describe('utils.transaction', function () {
     describe('TriggerSmartContract data / function_selector / parameter', function () {
         const SELECTOR = 'transfer(address,uint256)';
         const PARAMETER = '0'.repeat(63) + '5';
-        // approve(address,uint256), which is what actually gets signed in the misleading case
         const DATA = '095ea7b3' + '0'.repeat(63) + '5';
         const ERROR = 'Invalid TriggerSmartContract: data cannot be combined with function_selector or parameter';
 
@@ -239,8 +235,8 @@ describe('utils.transaction', function () {
             );
         }
 
-        // A transaction signed over DATA whose JSON also advertises another call.
-        function misleading(owner: string, extra: Record<string, unknown>) {
+        // A transaction carrying DATA plus the given extra fields.
+        function withExtra(owner: string, extra: Record<string, unknown>) {
             const tx = triggerTx(owner, { data: DATA });
             Object.assign(tx.raw_data.contract[0].parameter.value, extra);
             return tx;
@@ -260,20 +256,20 @@ describe('utils.transaction', function () {
         });
 
         it('ignores empty function_selector / parameter next to data', function () {
-            assert.isTrue(txCheck(misleading(OWNER, { function_selector: '', parameter: '' })));
+            assert.isTrue(txCheck(withExtra(OWNER, { function_selector: '', parameter: '' })));
         });
 
         it('rejects data combined with function_selector', function () {
-            const tx = misleading(OWNER, { function_selector: SELECTOR, parameter: PARAMETER });
+            const tx = withExtra(OWNER, { function_selector: SELECTOR, parameter: PARAMETER });
             assert.throws(() => txCheck(tx), ERROR);
         });
 
         it('rejects data combined with function_selector alone', function () {
-            assert.throws(() => txCheck(misleading(OWNER, { function_selector: SELECTOR })), ERROR);
+            assert.throws(() => txCheck(withExtra(OWNER, { function_selector: SELECTOR })), ERROR);
         });
 
         it('rejects data combined with parameter alone', function () {
-            assert.throws(() => txCheck(misleading(OWNER, { parameter: PARAMETER })), ERROR);
+            assert.throws(() => txCheck(withExtra(OWNER, { parameter: PARAMETER })), ERROR);
         });
 
         it('rejects the combination when rebuilding from args', function () {
@@ -293,19 +289,19 @@ describe('utils.transaction', function () {
             const account = await tronWeb.utils.accounts.generateAccount();
             const owner = account.address.hex.toLowerCase();
 
-            const genuine = triggerTx(owner, { data: DATA });
-            const signed = await tronWeb.trx.sign(genuine, account.privateKey);
+            const valid = triggerTx(owner, { data: DATA });
+            const signed = await tronWeb.trx.sign(valid, account.privateKey);
             assert.strictEqual(tronWeb.trx.ecRecover(signed), account.address.base58);
 
-            const tx = misleading(owner, { function_selector: SELECTOR, parameter: PARAMETER });
+            const tx = withExtra(owner, { function_selector: SELECTOR, parameter: PARAMETER });
             await assertThrow(tronWeb.trx.sign(tx, account.privateKey), ERROR);
 
-            const tampered = { ...signed, raw_data: tx.raw_data };
-            assert.throws(() => tronWeb.trx.ecRecover(tampered), ERROR);
+            const combined = { ...signed, raw_data: tx.raw_data };
+            assert.throws(() => tronWeb.trx.ecRecover(combined), ERROR);
         });
     });
 
-    describe('CreateSmartContract outer fields nested in new_contract', function () {
+    describe('CreateSmartContract outer fields', function () {
         const OTHER_OWNER = '41a614f803b6fd780986a42c78ec9c7f77e6ded13c';
         const NEW_CONTRACT = {
             origin_address: OWNER,
@@ -323,8 +319,8 @@ describe('utils.transaction', function () {
             );
         }
 
-        // Signed bytes carry the token transfer, the JSON only shows it inside new_contract.
-        function misleading(owner: string) {
+        // call_token_value / token_id moved from the top level into new_contract.
+        function nestedTokenFields(owner: string) {
             const tx = createTx(owner, { call_token_value: 5_000_000, token_id: '1000001' });
             const value = tx.raw_data.contract[0].parameter.value;
             value.new_contract = { ...value.new_contract, call_token_value: 5_000_000, token_id: '1000001' };
@@ -345,15 +341,15 @@ describe('utils.transaction', function () {
             assert.strictEqual(txPbToRawDataHex(txJsonToPb(tx)).toLowerCase(), plain.raw_data_hex);
         });
 
-        it('rejects a transaction whose signed token values only appear in new_contract', function () {
-            assert.isFalse(txCheck(misleading(OWNER)));
+        it('rejects a transaction whose call_token_value / token_id are inside new_contract', function () {
+            assert.isFalse(txCheck(nestedTokenFields(OWNER)));
         });
 
         it('refuses to sign such a transaction', async function () {
             const tronWeb = new TronWeb({ fullHost: 'http://127.0.0.1:1' });
             const account = await tronWeb.utils.accounts.generateAccount();
             const owner = account.address.hex.toLowerCase();
-            await assertThrow(tronWeb.trx.sign(misleading(owner), account.privateKey), 'Invalid transaction');
+            await assertThrow(tronWeb.trx.sign(nestedTokenFields(owner), account.privateKey), 'Invalid transaction');
         });
     });
 });
