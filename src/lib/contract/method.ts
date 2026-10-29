@@ -269,6 +269,9 @@ export class Method<AbiFrag extends Readonly<AbiFragmentNoErrConstructor>> {
             from: this.tronWeb.defaultAddress.hex,
             ...options,
         };
+        // send() must build a real transaction: a caller-supplied _isConstant would route it to
+        // triggerconstantcontract and skip txCheckWithArgs before the result is signed.
+        delete (options as _CallOptions)._isConstant;
 
         const parameters = args.map((value, index) => ({
             type: types[index],
